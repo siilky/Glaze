@@ -1,0 +1,247 @@
+/* Persona & Block Edit Views */
+#view-persona-edit, #view-block-edit {
+    background-color: var(--bg-gray);
+}
+
+/* Prompt Preset Editor */
+.prompt-container {
+    padding: 0;
+    padding-bottom: 80px;
+}
+
+.prompt-block {
+    background-color: var(--white);
+    border: none;
+    border-radius: 0;
+    border-bottom: 1px solid var(--separator-color);
+    margin-bottom: 0;
+    display: flex;
+    overflow: hidden;
+    box-shadow: none;
+    transition: transform 0.2s, box-shadow 0.2s;
+    align-items: center;
+    padding-right: 16px;
+}
+
+.prompt-block.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.preset-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--vk-blue);
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: background-color 0.2s;
+}
+
+.preset-selector:active {
+    background-color: var(--bg-gray);
+}
+
+.preset-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+#btn-header-add-persona {
+    color: inherit;
+}
+
+.block-handle {
+    width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    color: var(--text-light-gray);
+    font-size: 20px;
+    line-height: 1;
+    user-select: none;
+    padding: 0 4px;
+}
+
+.block-content {
+    flex: 1;
+    padding: 10px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.block-textarea {
+    width: 100%;
+    border: none;
+    resize: vertical;
+    min-height: 60px;
+    font-family: inherit;
+    font-size: 14px;
+    background: transparent;
+    color: var(--text-black);
+    outline: none;
+}
+
+.prompt-hint {
+    text-align: center;
+    color: var(--text-gray);
+    font-size: 12px;
+    margin-top: 20px;
+}
+
+/* Sub-tabs (VK Style) */
+.sub-tab-header {
+    display: flex;
+    background-color: var(--white);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.segmented-control {
+    display: flex;
+    background-color: var(--bg-gray);
+    border-radius: 10px;
+    padding: 2px;
+    overflow: hidden;
+    margin: 10px 16px;
+    width: 100%;
+    border: none;
+    position: relative;
+    z-index: 1;
+}
+
+.sub-tab-btn {
+    flex: 1;
+    text-align: center;
+    padding: 6px 0;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-gray);
+    cursor: pointer;
+    border-bottom: none;
+    border-radius: 8px;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.sub-tab-btn.active {
+    background-color: var(--white);
+    color: var(--text-black);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.sub-tab-btn:not(:last-child) {
+    border-right: none;
+}
+
+.sub-view {
+    display: none;
+}
+
+.sub-view.active-sub-view {
+    display: block;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.header-action-btn {
+    color: var(--vk-blue);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.block-name {
+    font-weight: 500;
+    font-size: 15px;
+    color: var(--text-black);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.block-actions {
+    display: flex;
+    align-items: center;
+}
+
+.block-edit, .block-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    fill: var(--text-gray);
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.block-edit:active {
+    opacity: 1;
+}
+
+.block-edit svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Persona Edit Header */
+.persona-edit-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 0;
+}
+
+.edit-hint {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-light-gray);
+}
+
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.label-row label {
+    margin-bottom: 0;
+}
+
+.expand-btn {
+    cursor: pointer;
+    color: var(--vk-blue);
+}
+
+.expand-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--vk-blue);
+}
+
+.fs-editor-body {
+    height: calc(100% - 56px);
+    padding: 16px;
+    background-color: var(--white);
+}
+
+#fs-editor-textarea {
+    width: 100%;
+    height: 100%;
+    border: none;
+    resize: none;
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    color: var(--text-black);
+    background-color: transparent;
+}

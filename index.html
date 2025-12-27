@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SillyCradle</title>
-    <link rel="stylesheet" href="src/styles.css">
+    <link rel="stylesheet" href="./src/styles.css">
 </head>
 <body>
 
@@ -18,7 +18,7 @@
         </div>
         <div class="header-content" id="header-content-default">
             <span id="header-title" data-i18n="header_dialogs">Сообщения</span>
-            <svg id="header-arrow" class="header-arrow" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+            <svg id="header-arrow" class="header-arrow" viewBox="0 0 24 24" style="display: none;"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
         <div class="header-chat-info" id="header-chat-info" style="display: none;">
             <div class="header-avatar"><img id="chat-header-avatar" src="" alt=""></div>
@@ -27,10 +27,13 @@
         <div id="header-actions" class="header-btn-right" style="display: none;">
             <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
         </div>
+        <div id="header-btn-delete-char" class="header-btn-right" style="display: none;">
+            <svg viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </div>
         
         <!-- Custom Dropdown -->
-        <div id="header-dropdown" class="header-dropdown" style="display: none;">
-        </div>
+        <!-- <div id="header-dropdown" class="header-dropdown" style="display: none;">
+        </div> -->
     </header>
 
     <!-- Main Content Area -->
@@ -67,11 +70,12 @@
             <!-- Persona Header -->
             <div class="menu-section user-profile" id="persona-card">
                 <div class="avatar big-avatar" style="background-color: #e88;">U</div>
-                <div class="info">
+                <div class="content">
                     <div class="title">User Persona</div>
-                    <div class="subtitle" data-i18n="persona_hint">Нажмите, чтобы сменить</div>
+                    <div class="item-subtitle" data-i18n="persona_hint">Нажмите, чтобы сменить</div>
                 </div>
             </div>
+
 
             <div class="section-header" data-i18n="section_settings">Настройки</div>
             <div class="menu-group">
@@ -87,14 +91,15 @@
                     </svg>
                     <div class="menu-text" data-i18n="menu_language">Язык: Русский</div>
                 </div>
-                <div class="menu-item">
+                <!--  <div class="menu-item">
                     <svg class="menu-icon" viewBox="0 0 24 24">
                         <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
                     </svg>
-                    <div class="menu-text" data-i18n="menu_app_settings">Настройки приложения</div>
+                    <div class="menu-text" data-i18n="menu_app_settings">Настройки приложения</div>  -->
                 </div>
             </div>
 
+            <!--
             <div class="section-header" data-i18n="section_content">Контент</div>
             <div class="menu-group">
                 <div class="menu-item">
@@ -110,7 +115,9 @@
                     <div class="menu-text" data-i18n="menu_lorebooks">Лорбуки (World Info)</div>
                 </div>
             </div>
+            -->
 
+            <!--
             <div class="section-header" data-i18n="section_info">Инфо</div>
             <div class="menu-group">
                 <div class="menu-item">
@@ -121,7 +128,7 @@
                 </div>
             </div>
         </div>
-
+         -->
         <!-- VIEW 4: GENERATION (API & PROMPT) -->
         <div id="view-generation" class="view">
             <!-- Sub-tabs Header -->
@@ -168,29 +175,27 @@
                     </div>
                     <div class="settings-item">
                         <label data-i18n="label_max_tokens">Max Output Tokens</label>
-                        <input type="number" id="api-max-tokens" value="200">
+                        <input type="number" id="api-max-tokens" value="1000">
                     </div>
                     <div class="settings-item">
                         <label data-i18n="label_context_size">Context Size</label>
-                        <input type="number" id="api-context" value="4096">
+                        <input type="number" id="api-context" value="32000">
                     </div>
-                </div>
-                
-                <div class="settings-padding">
-                    <div class="btn-save" id="btn-save-api" data-i18n="btn_save">Сохранить</div>
                 </div>
             </div>
 
             <!-- Sub-view: PRESET -->
             <div id="subview-preset" class="sub-view">
                 <div class="section-header section-header-flex">
-                    <span data-i18n="section_prompt_blocks">Блоки промпта</span>
+                    <div class="preset-selector" id="btn-preset-selector">
+                        <span id="current-preset-name">Default</span>
+                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
                     <div id="add-block-btn" class="header-action-btn">+</div>
                 </div>
                 <div class="prompt-container" id="prompt-blocks-list">
                     <!-- Blocks will be rendered here -->
                 </div>
-                <div class="prompt-hint" data-i18n="hint_drag_blocks">Перетаскивайте блоки за иконку слева</div>
             </div>
         </div>
 
@@ -201,12 +206,14 @@
             </div>
             
             <div class="chat-input-bar">
-                <div class="chat-btn" id="btn-magic">
-                    <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
-                </div>
-                <input type="text" id="chat-input" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder">
-                <div class="chat-btn" id="btn-send">
-                    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                <textarea id="chat-input" rows="1" placeholder="Сообщение..." data-i18n-placeholder="chat_placeholder"></textarea>
+                <div class="chat-input-buttons">
+                    <div class="chat-btn" id="btn-magic">
+                        <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+                    </div>
+                    <div class="chat-btn" id="btn-send">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    </div>
                 </div>
             </div>
 
@@ -226,6 +233,8 @@
         <div id="view-persona-edit" class="view">
             <div class="persona-edit-header">
                 <div class="avatar big-avatar" id="edit-persona-avatar"></div>
+                <div class="edit-avatar-hint" data-i18n="hint_change_avatar" style="font-size: 0.8em; opacity: 0.7; margin-top: 5px;">Нажмите для смены</div>
+                <input type="file" id="persona-avatar-upload" accept="image/*" style="display: none;">
             </div>
             
             <div class="section-header" data-i18n="section_basic_info">Основная информация</div>
@@ -241,13 +250,6 @@
                     </div>
                     <textarea id="persona-prompt-input" rows="3" placeholder="Описание персонажа..." data-i18n-placeholder="placeholder_char_desc"></textarea>
                 </div>
-                <div class="settings-item">
-                    <div class="label-row">
-                        <label data-i18n="label_first_msg">Первое сообщение</label>
-                        <div class="expand-btn" data-target="persona-first-msg-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
-                    </div>
-                    <textarea id="persona-first-msg-input" rows="3" placeholder="Приветствие..." data-i18n-placeholder="placeholder_greeting"></textarea>
-                </div>
             </div>
             
             <div class="settings-padding">
@@ -256,9 +258,79 @@
             </div>
         </div>
 
+        <!-- VIEW 8: CHARACTER EDIT -->
+        <div id="view-character-edit" class="view">
+            <div class="persona-edit-header">
+                <div class="avatar big-avatar" id="edit-char-avatar"></div>
+                <div class="edit-avatar-hint" data-i18n="hint_change_avatar" style="font-size: 0.8em; opacity: 0.7; margin-top: 5px;">Нажмите для смены</div>
+                <input type="file" id="char-avatar-upload" accept="image/*" style="display: none;">
+            </div>
+            
+            <div class="section-header" data-i18n="section_basic_info">Основная информация</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <label data-i18n="label_name">Имя</label>
+                    <input type="text" id="char-name-input">
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_description">Описание</label>
+                        <div class="expand-btn" data-target="char-description-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-description-input" rows="3"></textarea>
+                </div>
+                <div class="settings-item">
+                    <label data-i18n="label_creator_notes">Заметки автора</label>
+                    <textarea id="char-creator-notes-input" rows="2"></textarea>
+                </div>
+                <div class="settings-item">
+                    <label data-i18n="label_tags">Теги (через запятую)</label>
+                    <input type="text" id="char-tags-input">
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_personality">Личность и Сценарий</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_personality">Личность</label>
+                        <div class="expand-btn" data-target="char-personality-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-personality-input" rows="4"></textarea>
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_scenario">Сценарий</label>
+                        <div class="expand-btn" data-target="char-scenario-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-scenario-input" rows="3"></textarea>
+                </div>
+            </div>
+
+            <div class="section-header" data-i18n="section_dialogue">Диалог</div>
+            <div class="menu-group">
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_first_mes">Первое сообщение</label>
+                        <div class="expand-btn" data-target="char-first-mes-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-first-mes-input" rows="4"></textarea>
+                </div>
+                <div class="settings-item">
+                    <div class="label-row">
+                        <label data-i18n="label_mes_example">Примеры диалогов</label>
+                        <div class="expand-btn" data-target="char-mes-example-input"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                    </div>
+                    <textarea id="char-mes-example-input" rows="6"></textarea>
+                </div>
+            </div>
+
+            <div class="settings-padding">
+            </div>
+        </div>
+
         <!-- VIEW 7: BLOCK EDIT -->
         <div id="view-block-edit" class="view">
-            <div class="section-header" data-i18n="section_block_params">Параметры блока</div>
             <div class="menu-group">
                 <div class="settings-item">
                     <label data-i18n="label_role">Роль</label>
@@ -282,8 +354,7 @@
             </div>
             
             <div class="settings-padding">
-                <div class="btn-save" id="btn-save-block" data-i18n="btn_save">Сохранить</div>
-                <div class="btn-cancel-full" id="btn-cancel-block" data-i18n="btn_cancel">Отмена</div>
+                <div class="btn-delete-full" id="btn-delete-block" data-i18n="btn_delete">Удалить</div>
             </div>
         </div>
 
@@ -320,21 +391,24 @@
         </div>
     </nav>
 
-    <!-- Modal for History -->
-    <div id="history-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header" data-i18n="history_title">История чатов</div>
-            <div class="history-list" id="history-list">
-                <!-- History items -->
+    <!-- Bottom Sheet for Sessions (History) -->
+    <div id="sessions-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="history_title">История чатов</span>
+                <div id="btn-new-session-main" class="sheet-action-btn">+</div>
             </div>
-            <button id="btn-new-chat" class="btn-save" style="width: 100%; margin-top: 10px;" data-i18n="btn_new_chat">+ Новый чат</button>
-            <button id="history-close" class="btn-cancel" style="width: 100%; margin-top: 5px;" data-i18n="btn_close">Закрыть</button>
+            <div id="sessions-list" class="sheet-list">
+                <!-- Items will be populated here -->
+            </div>
         </div>
     </div>
 
     <!-- Bottom Sheet for Personas -->
     <div id="personas-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
         <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
             <div class="sheet-header">
                 <span class="sheet-title" data-i18n="sheet_title_personas">Персоны</span>
                 <div id="btn-add-persona" class="sheet-action-btn">+</div>
@@ -364,6 +438,7 @@
     <!-- Bottom Sheet for Character Options -->
     <div id="char-options-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
         <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
             <div class="sheet-header">
                 <span class="sheet-title" data-i18n="sheet_title_char_options">Персонаж</span>
             </div>
@@ -383,6 +458,7 @@
     <!-- Bottom Sheet for Character Selection -->
     <div id="char-selection-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
         <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
             <div class="sheet-header">
                 <span class="sheet-title" data-i18n="sheet_title_select_char">Выберите персонажа</span>
             </div>
@@ -395,6 +471,7 @@
     <!-- Bottom Sheet for Chat Actions -->
     <div id="chat-actions-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
         <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
             <div class="sheet-header">
                 <span class="sheet-title" id="chat-actions-title" data-i18n="sheet_title_chat_actions">Чат</span>
             </div>
@@ -414,6 +491,7 @@
     <!-- Bottom Sheet for Character Actions -->
     <div id="char-actions-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
         <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
             <div class="sheet-header">
                 <span class="sheet-title" id="char-actions-title" data-i18n="sheet_title_char_actions">Персонаж</span>
             </div>
@@ -421,6 +499,10 @@
                 <div class="sheet-item" id="btn-char-new-version">
                     <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></div>
                     <div class="sheet-item-content" data-i18n="action_new_version">Новая версия</div>
+                </div>
+                <div class="sheet-item" id="btn-char-favorite">
+                <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg></div>
+                <div class="sheet-item-content" id="lbl-char-favorite" data-i18n="action_add_fav">Добавить в избранное</div>
                 </div>
                 <div class="sheet-item" id="btn-char-delete">
                     <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
@@ -430,6 +512,117 @@
         </div>
     </div>
 
+    <!-- Bottom Sheet for Delete Confirmation -->
+    <div id="char-delete-confirm-sheet" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="confirm_delete_title">Удалить персонажа?</span>
+            </div>
+            <div class="sheet-list">
+                <div class="sheet-item" id="btn-confirm-delete-char">
+                    <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg></div>
+                    <div class="sheet-item-content" style="color: #ff4444;" data-i18n="btn_yes">Да</div>
+                </div>
+                <div class="sheet-item" id="btn-cancel-delete-char">
+                    <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+                    <div class="sheet-item-content" data-i18n="btn_no">Нет</div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <!-- Bottom Sheet for Prompt Presets -->
+    <div id="prompt-presets-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="sheet_title_presets">Пресеты</span>
+                <div id="btn-add-preset" class="sheet-action-btn">+</div>
+            </div>
+            <div id="prompt-presets-list" class="sheet-list">
+                <!-- Items will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for New Preset Name -->
+    <div id="new-preset-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="new_preset">Новый пресет</span>
+            </div>
+            <div class="menu-group" style="margin-bottom: 20px;">
+                <div class="settings-item">
+                    <input type="text" id="new-preset-name-input" placeholder="Name" data-i18n-placeholder="placeholder_preset_name">
+                </div>
+            </div>
+            <div class="btn-save" id="btn-create-preset" data-i18n="btn_create">Создать</div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for Message Actions -->
+    <div id="msg-actions-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="sheet_title_msg_actions">Сообщение</span>
+            </div>
+            <div class="sheet-list">
+                <div class="sheet-item" id="btn-msg-regenerate">
+                    <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></div>
+                    <div class="sheet-item-content" data-i18n="action_regenerate">Перегенерировать</div>
+                </div>
+                <div class="sheet-item" id="btn-msg-delete">
+                    <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
+                    <div class="sheet-item-content" style="color: #ff4444;" data-i18n="action_delete_msg">Удалить сообщение</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for Block Delete Confirmation -->
+    <div id="delete-block-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="confirm_delete_block">Удалить блок?</span>
+            </div>
+            <div class="sheet-list">
+                <div class="sheet-item" id="btn-confirm-delete-block">
+                    <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
+                    <div class="sheet-item-content" style="color: #ff4444;" data-i18n="btn_yes">Да</div>
+                </div>
+                <div class="sheet-item" id="btn-cancel-delete-block">
+                    <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+                    <div class="sheet-item-content" data-i18n="btn_no">Нет</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Sheet for Preset Delete Confirmation -->
+    <div id="delete-preset-sheet-overlay" class="modal-overlay bottom-sheet-overlay" style="display: none;">
+        <div class="bottom-sheet-content">
+            <div class="sheet-handle-bar"></div>
+            <div class="sheet-header">
+                <span class="sheet-title" data-i18n="confirm_delete_preset">Удалить пресет?</span>
+            </div>
+            <div class="sheet-list">
+                <div class="sheet-item" id="btn-confirm-delete-preset">
+                    <div class="sheet-item-icon" style="fill: #ff4444;"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
+                    <div class="sheet-item-content" style="color: #ff4444;" data-i18n="btn_yes">Да</div>
+                </div>
+                <div class="sheet-item" id="btn-cancel-delete-preset">
+                    <div class="sheet-item-icon"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></div>
+                    <div class="sheet-item-content" data-i18n="btn_no">Нет</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script type="module" src="./src/script.js"></script>
 </body>
 </html>
