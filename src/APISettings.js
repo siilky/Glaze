@@ -35,7 +35,9 @@ export function initSettings() {
         { id: 'api-key', key: 'api-key' },
         { id: 'api-model', key: 'api-model' },
         { id: 'api-max-tokens', key: 'api-max-tokens' },
-        { id: 'api-context', key: 'api-context' }
+        { id: 'api-context', key: 'api-context' },
+        { id: 'api-reasoning-start', key: 'sc_api_reasoning_start' },
+        { id: 'api-reasoning-end', key: 'sc_api_reasoning_end' }
     ];
 
     apiInputs.forEach(config => {
@@ -44,9 +46,50 @@ export function initSettings() {
             const saved = localStorage.getItem(config.key);
             if (saved) el.value = saved;
             
-            const save = () => localStorage.setItem(config.key, el.value.trim());
+            const save = (e) => {
+                let val = el.value.trim();
+                if (config.id === 'api-endpoint') {
+                    let normalized = val;
+                    if (normalized) {
+                        if (!/^https?:\/\//i.test(normalized)) {
+                            normalized = 'https://' + normalized;
+                        }
+                        if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
+
+                        const suffix = '/chat/completions';
+                        if (normalized.toLowerCase().endsWith(suffix)) {
+                            normalized = normalized.slice(0, -suffix.length);
+                        }
+                        if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
+
+                        if (!normalized.endsWith('/v1')) normalized += '/v1';
+                        localStorage.setItem('sc_api_endpoint_normalized', normalized);
+                    }
+                }
+                localStorage.setItem(config.key, val);
+            };
             el.addEventListener('input', save);
             el.addEventListener('change', save);
         }
     });
+
+    // Checkbox for Stream
+    const streamEl = document.getElementById('api-stream');
+    if (streamEl) {
+        const saved = localStorage.getItem('sc_api_stream');
+        streamEl.checked = saved === 'true';
+        streamEl.addEventListener('change', () => {
+            localStorage.setItem('sc_api_stream', streamEl.checked);
+        });
+    }
+
+    // Checkbox for Request Reasoning
+    const reasoningEl = document.getElementById('api-reasoning');
+    if (reasoningEl) {
+        const saved = localStorage.getItem('sc_api_request_reasoning');
+        reasoningEl.checked = saved === 'true';
+        reasoningEl.addEventListener('change', () => {
+            localStorage.setItem('sc_api_request_reasoning', reasoningEl.checked);
+        });
+    }
 }

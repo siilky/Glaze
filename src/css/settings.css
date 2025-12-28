@@ -67,13 +67,13 @@
     letter-spacing: 0.3px;
 }
 
-.settings-item, .settings-item-range {
+.settings-item, .settings-item-range, .settings-item-checkbox {
     padding: 12px 16px;
     border-bottom: 1px solid var(--separator-color);
     transition: border-color 0.3s ease;
 }
 
-.settings-item:last-child, .settings-item-range:last-child {
+.settings-item:last-child, .settings-item-range:last-child, .settings-item-checkbox:last-child {
     border-bottom: none;
 }
 
@@ -82,6 +82,27 @@
     margin-bottom: 6px;
     font-size: 14px;
     color: var(--text-gray);
+    transition: color 0.3s ease;
+}
+
+.settings-item-checkbox {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.settings-text-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    margin-right: 10px;
+}
+
+.settings-desc {
+    font-size: 12px;
+    color: var(--text-gray);
+    opacity: 0.7;
+    margin-top: 2px;
     transition: color 0.3s ease;
 }
 

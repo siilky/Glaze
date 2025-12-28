@@ -98,6 +98,7 @@ async function parsePng(file) {
 
 function normalizeCharacterData(json) {
     if (json.spec === 'chara_card_v2' && json.data) {
+        if (!json.data.alternate_greetings) json.data.alternate_greetings = [];
         return json.data;
     }
     if (json.name) {

@@ -3,6 +3,7 @@ import { translations, updateLanguage } from './i18n.js';
 import { currentLang, setLanguage } from './APPSettings.js';
 import * as CharList from './characterList.js';
 import * as Chat from './chat.js';
+import { renderDialogs } from './dialogList.js';
 import { initBottomSheet, openBottomSheet, closeBottomSheet, initRipple, initThemeToggle, initLanguageToggle, initHeaderDropdown } from './ui.js';
 import { initPromptEditor } from './promptBuilder.js';
 import { initPersonas } from './personas.js';
@@ -153,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     initHeaderDropdown(categories, activeCategories, (viewId, itemId) => {
-        if (viewId === 'view-dialogs') Chat.renderDialogs(itemId, openChatWrapper, openChatActionWrapper);
+        if (viewId === 'view-dialogs') renderDialogs(itemId, openChatWrapper, openChatActionWrapper);
         if (viewId === 'view-characters') CharList.renderList(itemId);
     });
 
@@ -162,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     CharList.loadCharacters(); // Загрузка из LocalStorage
     CharList.init(openChatWrapper);
     CharList.renderList(activeCategories['view-characters']);
-    Chat.renderDialogs('all', openChatWrapper, openChatActionWrapper);
+    renderDialogs('all', openChatWrapper, openChatActionWrapper);
     initPersonas(); // Now imported from personas.js
     Chat.initChat();
     
@@ -179,7 +180,9 @@ document.addEventListener('DOMContentLoaded', () => {
         'prompt-presets-sheet-overlay',
         'new-preset-sheet-overlay',
         'delete-block-sheet-overlay',
-        'delete-preset-sheet-overlay'
+        'delete-preset-sheet-overlay',
+        'session-delete-confirm-sheet',
+        'chat-info-sheet-overlay'
     ];
     sheetIds.forEach(id => initBottomSheet(id));
 
@@ -196,7 +199,7 @@ function openChatWrapper(char) {
     const previousView = document.querySelector('.view.active-view');
     Chat.openChat(char, () => {
         if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
-        Chat.renderDialogs(activeCategories['view-dialogs'], openChatWrapper, openChatActionWrapper);
+        renderDialogs(activeCategories['view-dialogs'], openChatWrapper, openChatActionWrapper);
     });
 }
 
@@ -221,52 +224,4 @@ function openChatActionWrapper(chat) {
         title.textContent = chat.name;
         openBottomSheet('chat-actions-sheet-overlay');
     }
-}
-
-// Sessions Sheet (formerly History Modal)
-document.getElementById('header-actions').addEventListener('click', () => {
-    renderSessions();
-    openBottomSheet('sessions-sheet-overlay');
-});
-
-document.getElementById('btn-new-session-main').addEventListener('click', () => {
-    console.log("Create new session");
-    closeBottomSheet('sessions-sheet-overlay');
-});
-
-function renderSessions() {
-    const list = document.getElementById('sessions-list');
-    list.innerHTML = '';
-    const sessions = [
-        { id: 1, name: 'Session 1 (Yesterday)' },
-        { id: 2, name: 'New Adventure' },
-        { id: 3, name: 'Test Chat' }
-    ];
-    
-    sessions.forEach(s => {
-        const el = document.createElement('div');
-        el.className = 'sheet-item';
-        el.innerHTML = `
-            <div class="sheet-item-icon">
-                <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-            </div>
-            <div class="sheet-item-content">${s.name}</div>
-            <div class="sheet-item-remove">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-            </div>
-        `;
-        
-        el.querySelector('.sheet-item-remove').addEventListener('click', (e) => {
-            e.stopPropagation();
-            console.log('Delete session ' + s.id);
-            el.remove();
-        });
-
-        el.addEventListener('click', () => {
-            console.log('Open session ' + s.id);
-            closeBottomSheet('sessions-sheet-overlay');
-        });
-
-        list.appendChild(el);
-    });
 }

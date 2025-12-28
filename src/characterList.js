@@ -2,6 +2,7 @@ import { translations } from './i18n.js';
 import { currentLang } from './APPSettings.js';
 import { attachLongPress, openBottomSheet, closeBottomSheet } from './ui.js';
 import { triggerCharacterImport } from './characterImporter.js';
+import { initEditor, openCharacterEditor } from './editor.js';
 
 export let characters = [];
 let onChatOpenCallback = null;
@@ -38,8 +39,29 @@ export function getCharacterByName(name) {
 
 export function deleteCharacter(index) {
     if (index > -1 && index < characters.length) {
+        const char = characters[index];
         characters.splice(index, 1);
         saveCharacters();
+
+        // Delete chats
+        const savedChats = localStorage.getItem('sc_chats');
+        if (savedChats) {
+            const chats = JSON.parse(savedChats);
+            if (chats && chats[char.name]) {
+                delete chats[char.name];
+                localStorage.setItem('sc_chats', JSON.stringify(chats));
+            }
+        }
+
+        // Delete unread status
+        const unread = JSON.parse(localStorage.getItem('sc_unread') || '{}');
+        if (unread && unread[char.name]) {
+            delete unread[char.name];
+            localStorage.setItem('sc_unread', JSON.stringify(unread));
+        }
+
+        // Notify components to update (e.g. dialog list)
+        window.dispatchEvent(new CustomEvent('character-updated', { detail: { character: null } }));
     }
 }
 
@@ -67,6 +89,7 @@ export function init(chatCallback) {
                     personality: data.personality || "",
                     scenario: data.scenario || "",
                     first_mes: data.first_mes || "",
+                    alternate_greetings: data.alternate_greetings || [],
                     mes_example: data.mes_example || "",
                     color: "#" + Math.floor(Math.random()*16777215).toString(16),
                     category: "anime",
@@ -89,9 +112,16 @@ export function init(chatCallback) {
     }
 
     // Init Editor and Actions
-    initEditor();
     initActionListeners();
     initSelectionList();
+    
+    initEditor({
+        getCharacter: getCharacter,
+        saveCharacters: saveCharacters,
+        addCharacter: addCharacter,
+        deleteCharacter: deleteCharacter,
+        renderList: renderList
+    });
 }
 
 export function renderList(category = 'all') {
@@ -134,7 +164,30 @@ export function renderList(category = 'all') {
     }
 
     // Render Main List
-    characters.forEach((char, index) => {
+    // Sort by last message time
+    const savedChats = localStorage.getItem('sc_chats');
+    const chats = savedChats ? JSON.parse(savedChats) : {};
+
+    const sortedChars = [...characters].sort((a, b) => {
+        const chatA = chats[a.name];
+        const chatB = chats[b.name];
+        
+        let timeA = 0;
+        let timeB = 0;
+
+        if (chatA && chatA.sessions && chatA.sessions[chatA.currentId]) {
+            const msgs = chatA.sessions[chatA.currentId];
+            if (msgs.length > 0) timeA = msgs[msgs.length - 1].timestamp || 0;
+        }
+        if (chatB && chatB.sessions && chatB.sessions[chatB.currentId]) {
+            const msgs = chatB.sessions[chatB.currentId];
+            if (msgs.length > 0) timeB = msgs[msgs.length - 1].timestamp || 0;
+        }
+        return timeB - timeA;
+    });
+
+    sortedChars.forEach((char) => {
+        const index = characters.indexOf(char); // Get original index for editing
         if (category !== 'all' && char.category !== category) return;
 
         const el = document.createElement('div');
@@ -175,7 +228,7 @@ export function renderList(category = 'all') {
 
         el.querySelector('.item-edit-btn').addEventListener('click', (e) => {
             e.stopPropagation();
-            openEditor(index);
+            openCharacterEditor(index);
         });
         
         list.appendChild(el);
@@ -187,215 +240,6 @@ export function renderList(category = 'all') {
     }
 }
 
-function initEditor() {
-    const editView = document.getElementById('view-character-edit');
-    const avatarEl = document.getElementById('edit-char-avatar');
-    const avatarInput = document.getElementById('char-avatar-upload');
-    
-    // Inputs
-    const nameInput = document.getElementById('char-name-input');
-    const descInput = document.getElementById('char-description-input');
-    const creatorNotesInput = document.getElementById('char-creator-notes-input');
-    const tagsInput = document.getElementById('char-tags-input');
-    const personalityInput = document.getElementById('char-personality-input');
-    const scenarioInput = document.getElementById('char-scenario-input');
-    const firstMesInput = document.getElementById('char-first-mes-input');
-    const mesExampleInput = document.getElementById('char-mes-example-input');
-    const inputs = [nameInput, descInput, creatorNotesInput, tagsInput, personalityInput, scenarioInput, firstMesInput, mesExampleInput];
-
-    let editingCharIndex = -1;
-    let tempAvatar = null;
-    let tempNewChar = null; // For new character creation
-
-    // Exported function to open editor
-    window.openCharacterEditor = (index) => {
-        editingCharIndex = index;
-        const isNew = index === -1;
-        const char = isNew ? { name: "", description: "", creator_notes: "", tags: [], personality: "", scenario: "", first_mes: "", mes_example: "", avatar: null } : getCharacter(index);
-        if (isNew) tempNewChar = char;
-
-        const previousView = document.querySelector('.view.active-view');
-        
-        // Populate fields
-        nameInput.value = char.name;
-        descInput.value = char.description || char.desc || "";
-        creatorNotesInput.value = char.creator_notes;
-        tagsInput.value = Array.isArray(char.tags) ? char.tags.join(', ') : (char.tags || "");
-        personalityInput.value = char.personality;
-        scenarioInput.value = char.scenario;
-        firstMesInput.value = char.first_mes;
-        mesExampleInput.value = char.mes_example;
-        
-        tempAvatar = char.avatar;
-        updateAvatarDisplay(tempAvatar, char.name);
-
-        // Show View
-        document.querySelector('.view.active-view').classList.remove('active-view');
-        editView.classList.add('active-view', 'anim-fade-in');
-        document.querySelector('.tabbar').style.display = 'none';
-
-        // Header Setup
-        const headerTitle = document.getElementById('header-title');
-        const headerArrow = document.getElementById('header-arrow');
-        const backBtn = document.getElementById('header-back');
-        const headerLogo = document.getElementById('header-logo');
-        const deleteBtn = document.getElementById('header-btn-delete-char');
-
-        if(headerLogo) headerLogo.style.display = 'none';
-        backBtn.style.display = 'flex';
-        headerArrow.style.display = 'none';
-        headerTitle.textContent = isNew ? translations[currentLang]['action_create_new'] : translations[currentLang]['header_editor'];
-        if(deleteBtn) deleteBtn.style.display = isNew ? 'none' : 'flex';
-
-        // Create/Save Button for New Character
-        let createBtn = document.getElementById('header-btn-create-char');
-        if (!createBtn) {
-            createBtn = document.createElement('div');
-            createBtn.id = 'header-btn-create-char';
-            createBtn.className = 'header-btn';
-            createBtn.style.alignItems = 'center';
-            createBtn.style.justifyContent = 'center';
-            createBtn.style.padding = '0 10px';
-            createBtn.style.cursor = 'pointer';
-            createBtn.style.position = 'absolute';
-            createBtn.style.right = '10px';
-            createBtn.innerHTML = `<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
-            // Insert before delete button or at end
-            if (deleteBtn && deleteBtn.parentNode) deleteBtn.parentNode.insertBefore(createBtn, deleteBtn);
-            else backBtn.parentNode.appendChild(createBtn);
-            
-            createBtn.addEventListener('click', () => {
-                if (tempNewChar) {
-                    if (!tempNewChar.name || !tempNewChar.name.trim()) {
-                        alert(translations[currentLang]['placeholder_enter_name'] || "Name is required");
-                        return;
-                    }
-                    tempNewChar.color = "#" + Math.floor(Math.random()*16777215).toString(16);
-                    tempNewChar.category = "anime";
-                    tempNewChar.version = "v1.0";
-                    addCharacter(tempNewChar);
-                    renderList();
-                    backBtn.click();
-                }
-            });
-        }
-        createBtn.style.display = isNew ? 'flex' : 'none';
-
-        // Back Button Logic
-        backBtn.onclick = () => {
-            // Close Editor
-            editView.classList.remove('anim-fade-in');
-            editView.classList.add('anim-fade-out');
-            
-            if (previousView) previousView.classList.add('active-view', 'anim-fade-in');
-
-            const onAnimationEnd = () => {
-                editView.classList.remove('active-view', 'anim-fade-out');
-                if (previousView) previousView.classList.remove('anim-fade-in');
-            };
-            editView.addEventListener('animationend', onAnimationEnd, { once: true });
-
-            // Restore Header
-            if(headerLogo) headerLogo.style.display = 'flex';
-            backBtn.style.display = 'none';
-            if(deleteBtn) deleteBtn.style.display = 'none';
-            if(createBtn) createBtn.style.display = 'none';
-            
-            // Restore Title & Arrow
-            if (previousView) {
-                const prevTab = document.querySelector(`.tab-btn[data-target="${previousView.id}"]`);
-                if (prevTab) {
-                    const titleKey = prevTab.getAttribute('data-i18n-title');
-                    headerTitle.textContent = translations[currentLang][titleKey];
-                }
-                const hasDropdown = (previousView.id === 'view-dialogs' || previousView.id === 'view-characters');
-                headerArrow.style.display = hasDropdown ? 'block' : 'none';
-            }
-
-            document.querySelector('.tabbar').style.display = 'flex';
-            renderList(); // Refresh list
-        };
-
-        // Delete Button Logic
-        if (deleteBtn) {
-            deleteBtn.onclick = () => {
-                openBottomSheet('char-delete-confirm-sheet');
-            };
-        }
-
-        // Confirm Delete Logic
-        const confirmDeleteBtn = document.getElementById('btn-confirm-delete-char');
-        const cancelDeleteBtn = document.getElementById('btn-cancel-delete-char');
-
-        const newConfirmBtn = confirmDeleteBtn.cloneNode(true);
-        confirmDeleteBtn.parentNode.replaceChild(newConfirmBtn, confirmDeleteBtn);
-        
-        newConfirmBtn.addEventListener('click', () => {
-            deleteCharacter(editingCharIndex);
-            closeBottomSheet('char-delete-confirm-sheet');
-            backBtn.click();
-        });
-
-        cancelDeleteBtn.onclick = () => closeBottomSheet('char-delete-confirm-sheet');
-    };
-
-    function updateAvatarDisplay(src, name) {
-        if (src) {
-            avatarEl.innerHTML = `<img src="${src}" style="width:100%;height:100%;object-fit:cover;">`;
-        } else {
-             avatarEl.innerHTML = `<div style="width:100%;height:100%;background-color:#66ccff;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;font-size:2em;">${(name||"?")[0]}</div>`;
-        }
-    }
-
-    const autoSave = () => {
-        if (editingCharIndex > -1) {
-            const char = getCharacter(editingCharIndex);
-            char.name = nameInput.value;
-            char.description = descInput.value;
-            char.desc = descInput.value;
-            char.creator_notes = creatorNotesInput.value;
-            char.tags = tagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-            char.personality = personalityInput.value;
-            char.scenario = scenarioInput.value;
-            char.first_mes = firstMesInput.value;
-            char.mes_example = mesExampleInput.value;
-            char.avatar = tempAvatar;
-            saveCharacters();
-        } else if (tempNewChar) {
-            // Update temp object for new character
-            tempNewChar.name = nameInput.value;
-            tempNewChar.description = descInput.value;
-            tempNewChar.desc = descInput.value;
-            tempNewChar.creator_notes = creatorNotesInput.value;
-            tempNewChar.tags = tagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-            tempNewChar.personality = personalityInput.value;
-            tempNewChar.scenario = scenarioInput.value;
-            tempNewChar.first_mes = firstMesInput.value;
-            tempNewChar.mes_example = mesExampleInput.value;
-            tempNewChar.avatar = tempAvatar;
-        }
-    };
-
-    inputs.forEach(input => input.addEventListener('input', autoSave));
-
-    avatarEl.addEventListener('click', () => avatarInput.click());
-    avatarInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                tempAvatar = ev.target.result;
-                updateAvatarDisplay(tempAvatar, nameInput.value);
-                autoSave();
-            };
-            reader.readAsDataURL(file);
-        }
-    });
-}
-
-function openEditor(index) {
-    if (window.openCharacterEditor) window.openCharacterEditor(index);
-}
 
 function openActions(char, index) {
     activeActionCharIndex = index;
@@ -445,7 +289,7 @@ function initActionListeners() {
     document.getElementById('btn-create-char').addEventListener('click', () => {
         closeBottomSheet('char-options-sheet-overlay');
         // Open editor for new character (index -1)
-        openEditor(-1);
+        openCharacterEditor(-1);
     });
 }
 

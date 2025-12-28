@@ -19,6 +19,7 @@ export function initPromptEditor() {
     const btnAddPreset = document.getElementById('btn-add-preset');
     const btnCreatePreset = document.getElementById('btn-create-preset');
     const newPresetInput = document.getElementById('new-preset-name-input');
+    const impInput = document.getElementById('impersonation-prompt-input');
     
     // Delete Confirmation Elements
     const btnConfirmDeleteBlock = document.getElementById('btn-confirm-delete-block');
@@ -80,6 +81,7 @@ export function initPromptEditor() {
     function updatePresetUI() {
         if (currentPresetLabel) currentPresetLabel.textContent = activePreset.name;
         renderBlocks();
+        if (impInput) impInput.value = activePreset.impersonationPrompt || "";
     }
 
     // Preset Selector Logic
@@ -356,6 +358,7 @@ export function initPromptEditor() {
         const newPreset = {
             id: Date.now().toString(),
             name: defaultName || "Imported Preset",
+            impersonationPrompt: data.impersonation_prompt || "",
             blocks: orderedBlocks
         };
 
@@ -382,6 +385,7 @@ export function initPromptEditor() {
             const newPreset = {
                 id: Date.now().toString(),
                 name: name,
+                impersonationPrompt: "",
                 blocks: [...mandatoryBlocks] // Start with mandatory blocks
             };
             presets.push(newPreset);
@@ -650,5 +654,12 @@ export function initPromptEditor() {
     
     if (btnCancelDeleteBlock) {
         btnCancelDeleteBlock.addEventListener('click', () => closeBottomSheet('delete-block-sheet-overlay'));
+    }
+
+    if (impInput) {
+        impInput.addEventListener('input', () => {
+            activePreset.impersonationPrompt = impInput.value;
+            savePresets();
+        });
     }
 }

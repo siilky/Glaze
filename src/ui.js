@@ -201,3 +201,43 @@ export function initHeaderDropdown(categories, activeCategories, onCategoryChang
         }
     });
 }
+
+export function scrollToBottom(elementId, targetElement) {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    requestAnimationFrame(() => {
+        const maxScroll = element.scrollHeight - element.clientHeight;
+        let target = maxScroll;
+
+        if (targetElement) {
+            const elRect = targetElement.getBoundingClientRect();
+            const containerRect = element.getBoundingClientRect();
+            target = elRect.top - containerRect.top + element.scrollTop;
+        }
+
+        if (target > maxScroll) target = maxScroll;
+        if (target < 0) target = 0;
+
+        const start = element.scrollTop;
+        const change = target - start;
+        
+        if (Math.abs(change) < 2) return;
+
+        const duration = 400;
+        let startTime = null;
+
+        function animate(currentTime) {
+            if (!startTime) startTime = currentTime;
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const ease = 1 - Math.pow(1 - progress, 3); // Ease Out Cubic
+            
+            element.scrollTop = start + (change * ease);
+
+            if (elapsed < duration) requestAnimationFrame(animate);
+            else element.scrollTop = target;
+        }
+        requestAnimationFrame(animate);
+    });
+}
