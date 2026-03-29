@@ -122,7 +122,7 @@ jobs:
 
       - name: Get version from package.json
         id: ver
-        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+        run: echo "version=$(node -p "require('./package.json').version.replace(/\s+/g, '-')")" >> $GITHUB_OUTPUT
 
       - name: Rename artifacts
         run: |
