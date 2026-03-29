@@ -1,0 +1,458 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+}
+
+/* Vue Root Element */
+#app {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--app-bg);
+    transition: background-color 0.3s ease;
+}
+
+:root {
+    /* Резервируем место под статус-бар и навбар */
+    --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+    --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+    --sal: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+    --sar: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+    --transition-speed: 0.15s;
+    --vk-blue: #7996ce;
+    --vk-blue-rgb: 121, 150, 206;
+    --element-blur: 20px;
+    /* Сила размытия плашек меню и таббара */
+    --element-opacity: 0.7;
+    /* Прозрачность плашек (чем меньше, тем лучше видно размытие) */
+
+    /* Default UI Colors */
+    --ui-bg-default-rgb: 255, 255, 255;
+}
+
+html {
+    position: fixed;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+body.dark-theme {
+    --ui-bg-default-rgb: 30, 30, 30;
+}
+
+body {
+    /* Применяем отступы */
+    width: 100%;
+    padding-top: 0;
+    padding-bottom: 0;
+    border: none !important;
+    margin: 0;
+    box-sizing: border-box;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text-black);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: normal;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    display: flex;
+    opacity: 0;
+    flex-direction: column;
+    transition: color 0.3s ease;
+
+    /* Dynamic UI Color Variable */
+    --ui-bg-rgb: var(--theme-ui-color-rgb, var(--ui-bg-default-rgb));
+}
+
+input,
+textarea,
+select,
+button {
+    font-family: inherit;
+    font-weight: inherit;
+}
+
+/* App Layout Wrapper */
+.app-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+/* Main Container */
+main {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+    /* Делаем main контейнером для position: fixed, чтобы они уважали отступы body */
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    /* Скролл теперь на main */
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Views */
+.view {
+    width: 100%;
+    min-height: 100%;
+    background-color: transparent;
+    /* View теперь прозрачен! */
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+/* Sub-views visibility */
+.sub-view {
+    display: none;
+    flex: 1;
+    /* overflow-y: auto; */
+    -webkit-overflow-scrolling: touch;
+}
+
+.sub-view.active-sub-view {
+    display: block;
+}
+
+/* Page Transitions */
+.view.anim-fade-in {
+    animation: fadeIn var(--transition-speed) ease-out forwards;
+}
+
+.view.anim-fade-out {
+    animation: fadeOut var(--transition-speed) ease-out forwards;
+}
+
+/* Header Arrow Animation */
+.header-arrow {
+    transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transform-origin: center;
+}
+
+.header-arrow.rotated {
+    transform: rotate(180deg);
+}
+
+/* API Sliders Styling */
+input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    background: transparent;
+    margin: 12px 0;
+    height: 30px;
+    display: flex;
+    align-items: center;
+}
+
+input[type=range]:focus {
+    outline: none;
+}
+
+input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    background: #e1e3e6;
+    border-radius: 2px;
+    border: none;
+    box-shadow: none;
+    transition: background-color 0.3s ease;
+}
+
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 20px;
+    width: 20px;
+    border-radius: 50%;
+    background: var(--vk-blue);
+    cursor: pointer;
+    margin-top: -8px;
+    /* (4px track - 20px thumb) / 2 */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    border: none;
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+input[type=range]:active::-webkit-slider-thumb {
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+body.dark-theme input[type=range]::-webkit-slider-runnable-track {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+body.dark-theme input[type=range]::-webkit-slider-thumb {
+    background: #e0e0e0;
+    border-color: transparent;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* Prevent transitions on load */
+body.preload * {
+    transition: none !important;
+}
+
+body.dark-theme .api-status {
+    background: rgba(255, 255, 255, 0.15) !important;
+    /* Более отчетливый фон */
+    color: #fff;
+}
+
+/* Input with Icon (Model Selector) */
+.input-with-icon {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.input-with-icon input {
+    width: 100%;
+    padding-right: 40px;
+    /* Space for icon */
+}
+
+.input-with-icon .icon-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-gray);
+    background: transparent;
+    border-radius: 0 8px 8px 0;
+}
+
+/* App Entry Animation */
+@keyframes app-entry {
+    0% {
+        opacity: 0;
+        transform: scale(0.98) translateY(10px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+body.app-loaded {
+    opacity: 1;
+    animation: app-entry 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    will-change: opacity, transform;
+}
+
+.tabbar {
+    padding-bottom: 7px !important;
+    transition: padding-bottom 0.3s ease, background-color 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    z-index: 10;
+    flex-shrink: 0;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+body.dark-theme .tabbar {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Global Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* App Loader */
+.app-loader-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff;
+    opacity: 0;
+    animation: loaderFadeIn 0.3s ease-out forwards;
+    animation-delay: 0.15s;
+    /* Задержка, чтобы не моргало при быстрой загрузке */
+}
+
+body.dark-theme .app-loader-container {
+    background-color: #19191a;
+}
+
+.app-loader-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top-color: var(--vk-blue, #7996ce);
+    border-radius: 50%;
+    animation: loaderSpin 0.8s linear infinite;
+}
+
+body.dark-theme .app-loader-spinner {
+    border-color: rgba(255, 255, 255, 0.1);
+    border-top-color: var(--vk-blue, #7996ce);
+}
+
+@keyframes loaderFadeIn {
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes loaderSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Global Transitions */
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0 !important;
+}
+
+/* Custom Background Theme Overrides */
+/* Когда есть кастомный фон, main становится прозрачным, открывая картинку на body */
+body.has-custom-background,
+body.has-custom-background #app {
+    background-color: transparent !important;
+}
+
+body.has-custom-background .view {
+    background-color: transparent;
+    background-image: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+body.has-custom-background .chat-container {
+    background-color: transparent;
+}
+
+/* Glassmorphism for Inputs and Containers */
+/* Containers (Full Blur) */
+.menu-group {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+    background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+    border: var(--border-width, 1px) solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border-radius: 20px;
+    margin: 0 16px 16px;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+    position: relative;
+    z-index: 1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.preset-selector,
+.api-status {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+    background-image: url("data:image/svg+xml,%3Csvg width='200' height='200' viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.03'/%3E%3C/svg%3E");
+    border: var(--border-width, 1px) solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border-radius: 12px;
+}
+
+/* Inputs (Half Blur) */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+textarea,
+select {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(calc(var(--element-blur, 12px) / 2));
+    -webkit-backdrop-filter: blur(calc(var(--element-blur, 12px) / 2));
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 10px;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+select {
+    overflow: hidden;
+}
+
+body.dark-theme .menu-group {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    border: var(--border-width, 1px) solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+body.dark-theme .preset-selector,
+body.dark-theme .api-status {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    border: var(--border-width, 1px) solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+body.dark-theme input[type="text"],
+body.dark-theme input[type="password"],
+body.dark-theme input[type="number"],
+body.dark-theme input[type="search"],
+body.dark-theme textarea,
+body.dark-theme select {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Generic UI Elements (Header, Bottom Sheet) */
+.app-header,
+.bottom-sheet-content {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+}
+
+body.dark-theme .app-header,
+body.dark-theme .bottom-sheet-content {
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+}

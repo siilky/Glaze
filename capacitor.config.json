@@ -1,0 +1,16 @@
+{
+  "appId": "com.hydall.glaze",
+  "appName": "Glaze",
+  "webDir": "dist",
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "true"
+    },
+    "Keyboard": {
+      "resizeOnFullScreen": false
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

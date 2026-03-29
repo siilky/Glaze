@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Glaze</string>
+    <string name="title_activity_main">Glaze</string>
+    <string name="package_name">com.hydall.glaze</string>
+    <string name="custom_url_scheme">com.hydall.glaze</string>
+</resources>

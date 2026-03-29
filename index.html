@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
+    <title>Glaze</title>
+    <style>
+        /* Critical CSS: предотвращает белую вспышку и скрывает контент до загрузки */
+        html {
+            background-color: #19191a;
+            /* Темный фон по умолчанию */
+        }
+
+        body {
+            opacity: 0;
+            /* Скрываем контент изначально */
+            background-color: #19191a;
+        }
+    </style>
+    <script>
+        // Мгновенная установка фона в зависимости от темы (если сохранена)
+        try {
+            const mode = localStorage.getItem('gz_theme_mode'); // Ключ из APPSettings
+            const isSystemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            // Если явно светлая тема или системная светлая - ставим белый фон
+            if (mode === 'light' || (mode === 'system' && !isSystemDark)) {
+                document.documentElement.style.backgroundColor = '#ffffff';
+                document.body.style.backgroundColor = '#ffffff';
+            }
+        } catch (e) { }
+    </script>
+</head>
+
+<body class="preload">
+    <div id="app"></div>
+    <script type="module">
+        import { initGlobalErrorHandling } from './src/utils/errors.js';
+        initGlobalErrorHandling();
+    </script>
+    <script type="module">
+        import { createApp } from 'vue';
+        import App from './src/App.vue';
+        import './src/assets/styles.css';
+
+        const app = createApp(App);
+
+        // Vue-specific error handling
+        app.config.errorHandler = (err, vm, info) => {
+            console.error('[Vue Error]', err, info);
+            window.dispatchEvent(new CustomEvent('vue-error', { detail: { err, info } }));
+        };
+
+        app.mount('#app');
+    </script>
+</body>
+
+</html>
