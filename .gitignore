@@ -1,0 +1,85 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Production
+dist/
+dist-ssr/
+
+# Vite / Build outputs
+*.local
+.vercel
+.netlify
+.output
+.turbo
+
+# IDEs / Editors
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.iml
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.icloud
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# Capacitor / Native platforms
+# Only ignore Android/iOS build folders if you want to keep platforms in git
+# /android
+# /ios
+
+# Android platform specific
+.gradle/
+build/
+local.properties
+captures/
+*.apk
+*.aar
+*.jks
+*.keystore
+/android/app/build
+/android/app/src/main/assets/public
+/android/app/src/main/assets/capacitor.config.json
+/android/app/src/main/assets/capacitor.plugins.json
+/android/app/src/main/res/xml/config.xml
+
+# iOS platform specific
+/ios/App/App/public
+/ios/App/App/build
+/ios/App/Pods
+/ios/App/App.xcworkspace/xcuserdata
+/ios/App/App.xcodeproj/project.xcworkspace
+/ios/App/App.xcodeproj/xcuserdata
+
+# Project specific
+*.json.bak
+*.png.bak
+/*.vue
+/*.png
+/*.jpg
