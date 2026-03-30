@@ -848,12 +848,15 @@ async function sendMessage() {
         if (state) {
             if (state.controller) state.controller.abort();
             if (state.restoreState) state.restoreState();
-            
+
             if (state.type === 'impersonation') {
                 isImpersonating.value = false;
             }
 
             delete generatingStates[activeChatChar.id];
+            isGenerating.value = false;
+        } else {
+            // Stale isGenerating flag — no active generation found, just reset
             isGenerating.value = false;
         }
         return;
@@ -1052,6 +1055,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }, 100);
 
     const restoreState = async (isError = false) => {
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
         if (generatingStates[char.id]?.timerId) clearInterval(generatingStates[char.id].timerId);
         localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
         
@@ -1119,6 +1123,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     const onError = async (e) => {
         const state = generatingStates[char.id];
         if (!state || state.genId !== genId) return;
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
         // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
         if (e.message === "Context limit exceeded") {
@@ -1245,9 +1250,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                 }
             },
             onUpdate,
-            onComplete: async (response, finalReasoning) => {
+            onComplete: async (response, finalReasoning, meta) => {
         const currentState = generatingStates[char.id];
         if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
         localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
 
         if (!currentState || currentState.genId !== genId) return;
@@ -1287,7 +1293,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             msg.genTime = duration;
             msg.tokens = estimateTokens(response);
             msg.isTyping = false;
-            
+            if (meta?.partialError) {
+                msg.isPartial = true;
+                msg.partialErrorMsg = meta.partialError;
+            }
+
             // Update swipes
             if (!msg.swipes) msg.swipes = [];
             if (!msg.swipesMeta) msg.swipesMeta = [];
@@ -1331,7 +1341,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                     msg.genTime = duration;
                     msg.tokens = estimateTokens(response);
                     msg.isTyping = false;
-                    
+                    if (meta?.partialError) {
+                        msg.isPartial = true;
+                        msg.partialErrorMsg = meta.partialError;
+                    }
+
                     if (!msg.swipes) msg.swipes = [];
                     if (!msg.swipesMeta) msg.swipesMeta = [];
                     

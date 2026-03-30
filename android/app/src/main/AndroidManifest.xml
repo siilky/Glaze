@@ -27,6 +27,7 @@
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
             android:usesCleartextTraffic="true"
+            android:windowSoftInputMode="adjustPan"
             android:exported="true">
 
             <intent-filter>

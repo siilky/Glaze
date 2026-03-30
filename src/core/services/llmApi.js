@@ -24,6 +24,13 @@ export async function executeRequest({
 
     const hasInlineTags = !!tagStart && !!tagEnd;
 
+    // Timeout configuration (configurable via localStorage for future settings UI)
+    const CONNECT_TIMEOUT = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
+    const STREAM_TIMEOUT = parseInt(localStorage.getItem('gz_api_stream_timeout')) || 120000;
+    let connectTimer = null;
+    let streamTimer = null;
+    let timedOut = false;
+
     // Keep screen on during generation to prevent OS suspension
     let wakeLock = null;
     const requestWakeLock = async () => {
@@ -83,7 +90,9 @@ export async function executeRequest({
                 url: `${apiUrl}/chat/completions`,
                 headers: headers,
                 data: requestBody,
-                responseType: 'json'
+                responseType: 'json',
+                connectTimeout: CONNECT_TIMEOUT,
+                readTimeout: STREAM_TIMEOUT
             });
 
             if (response.status >= 400) {
@@ -121,12 +130,18 @@ export async function executeRequest({
             return;
         }
 
+        // Connection timeout — abort if server doesn't respond
+        connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
+
         const response = await fetch(`${apiUrl}/chat/completions`, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(requestBody),
             signal: controller ? controller.signal : undefined
         });
+
+        clearTimeout(connectTimer);
+        connectTimer = null;
 
         if (!response.ok) {
             let errText = "";
@@ -140,9 +155,16 @@ export async function executeRequest({
             let isFirst = true;
             let previousEffectiveText = "";
 
+            const resetStreamTimer = () => {
+                if (streamTimer) clearTimeout(streamTimer);
+                streamTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, STREAM_TIMEOUT);
+            };
+            resetStreamTimer();
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+                resetStreamTimer();
 
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n');
@@ -232,6 +254,8 @@ export async function executeRequest({
                 }
             }
 
+            if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
+
             // Final processing for onComplete
             let finalReasoning = requestReasoning ? accumulatedReasoning : "";
             let finalText = fullText;
@@ -284,8 +308,18 @@ export async function executeRequest({
             if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
         }
     } catch (e) {
-        // If aborted but we already have partial text — save it as a successful response
         if (e.name === 'AbortError') {
+            if (timedOut) {
+                // Timeout-induced abort — treat as error, not user cancellation
+                if (fullText.length > 0) {
+                    if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: "Generation timed out" });
+                } else {
+                    if (onError) onError(new Error("Generation timed out — no response from server"));
+                }
+                return;
+            }
+
+            // User-initiated abort — save partial text if available
             if (fullText.length > 0) {
                 if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null);
             } else {
@@ -294,19 +328,18 @@ export async function executeRequest({
             return;
         }
 
-        // If network dropped (while backgrounded) but text was received — save it as a successful response
+        // Network error (connection abort, DNS failure, etc.) — save partial text cleanly
         if (fullText.length > 0) {
             console.warn("Network error during stream, saving partial response:", e);
-
             const errorMsg = e.message || "Stream Error";
-            const errorHtml = `<div class="msg-error-footer" style="margin-top: 10px; padding: 8px 12px; border-radius: 8px; background-color: #ff5252; color: white; font-size: 13px; font-family: monospace; white-space: pre-wrap; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg><span>${errorMsg}</span></div>`;
-
-            if (onComplete) onComplete(cleanText(fullText) + errorHtml, requestReasoning ? accumulatedReasoning : null);
+            if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: errorMsg });
             return;
         }
 
         if (onError) onError(e);
     } finally {
+        if (connectTimer) clearTimeout(connectTimer);
+        if (streamTimer) clearTimeout(streamTimer);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (wakeLock) {
             try { wakeLock.release(); } catch (e) { }

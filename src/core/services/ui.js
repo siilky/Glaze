@@ -455,8 +455,10 @@ export function initViewportFix() {
 
     // Fix for 100vh on mobile browsers (address bar issue)
     const setVh = () => {
-        // Skip recalculating height while the keyboard is open to avoid layout jumps
-        if (isKeyboardOpen.value) return;
+        // iOS WKWebView: skip during keyboard animation to prevent layout jumps.
+        // Android (incl. old WebViews that ignore interactive-widget=overlays-content):
+        // allow update so --vh tracks the actual shrunken viewport height.
+        if (isKeyboardOpen.value && isIos) return;
 
         const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
@@ -497,7 +499,7 @@ export function initViewportFix() {
                 document.documentElement.style.setProperty(`--${shorthands[key]}`, `${finalValue}px`);
             }
         }
-            logger.debug('[UI] Safe area changed:', insets);
+        logger.debug('[UI] Safe area changed:', insets);
     });
 
     // Set default keyboard height for drawer
@@ -561,11 +563,11 @@ export function initViewportFix() {
             isKeyboardOpen.value = true;
             document.body.classList.add('keyboard-open');
             resetBodyScroll();
-            
+
             if (info && info.keyboardHeight) {
                 document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
                 localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
-                
+
                 const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
                 const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
                 const effectiveOverlap = Math.max(0, info.keyboardHeight - viewportShrunk);
