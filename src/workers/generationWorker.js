@@ -493,6 +493,7 @@ function buildPromptMessagesWorker(args) {
                         return {
                             role: m.role || (m.isUser ? 'user' : 'assistant'),
                             content: content,
+                            image: m.image,
                             isHistory: true,
                             chatId: m.chatId !== undefined ? m.chatId : (m.originalIndex !== undefined ? m.originalIndex : i)
                         };

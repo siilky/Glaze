@@ -449,6 +449,10 @@ onUnmounted(() => {
                     </div>
                     <ShadowContent v-else :html="combinedMessageData.html" :is-selected="isSelected" />
                     
+                    <div v-if="message.image" class="msg-image-attachment">
+                        <img :src="message.image" alt="Attached image" />
+                    </div>
+
                     <div v-if="layoutMode === 'bubble'" class="bubble-meta">
                         <span class="msg-index gen-stat" v-if="!uiHideMsgId">#{{ index + 1 }}</span>
                         
@@ -612,6 +616,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.msg-image-attachment {
+    margin-top: 8px;
+    border-radius: 12px;
+    overflow: hidden;
+    max-width: 100%;
+}
+.msg-image-attachment img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 12px;
+    display: block;
+    object-fit: cover;
+}
+
 .message-section {
     padding: 12px 16px;
     display: flex;

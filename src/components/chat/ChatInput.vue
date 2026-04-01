@@ -42,9 +42,43 @@ const kbListeners = [];
 
 const currentAction = computed(() => {
     if (props.isGenerating) return 'stop';
-    if (props.modelValue && props.modelValue.trim()) return 'send';
+    if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) return 'send';
     return 'impersonate';
 });
+
+const attachedImage = ref(null);
+const imageInput = ref(null);
+
+const triggerImageUpload = () => {
+    if (imageInput.value) imageInput.value.click();
+};
+
+const onImageSelected = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            attachedImage.value = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+    if (imageInput.value) imageInput.value.value = '';
+};
+
+const clearImage = () => {
+    attachedImage.value = null;
+};
+
+const handleSend = () => {
+    if (props.isGenerating) {
+        emit('send');
+    } else if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) {
+        emit('send', attachedImage.value);
+        attachedImage.value = null;
+    } else {
+        emit('magic-impersonate');
+    }
+};
 
 
 const requestPreviewSheet = ref(null);
@@ -322,6 +356,12 @@ defineExpose({
         <div class="chat-input-content">
             <div class="chat-input-bar" :class="{ 'mode-normal': !isSelectionMode && !isSearchMode, 'mode-special': isSelectionMode || isSearchMode }" @click.stop>
                 <div class="input-row-container">
+                    <div v-if="attachedImage && !isSelectionMode && !isSearchMode" class="attached-image-preview">
+                        <img :src="attachedImage" alt="Attached preview" />
+                        <div class="remove-image-btn" @click.stop="clearImage">
+                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </div>
+                    </div>
                     <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode">
                         <template v-if="isSearchMode">
                             <div class="search-counts-wrapper">
@@ -367,13 +407,16 @@ defineExpose({
                             <div class="chat-btn circle-btn" id="btn-magic" @click.stop="toggleMagicMenu">
                                 <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
                             </div>
+                            <div class="chat-btn circle-btn" @click.stop="triggerImageUpload">
+                                <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+                            </div>
                             <div class="chat-btn circle-btn" @click.stop="openFullScreenEditor">
                                 <svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
                             </div>
                         </div>
 
                         <div class="send-btn-wrapper">
-                            <div class="chat-action-btn" @click="isGenerating ? emit('send') : ((modelValue && modelValue.trim()) ? emit('send') : emit('magic-impersonate'))">
+                            <div class="chat-action-btn" @click="handleSend">
                                 <div class="btn-icon-wrapper">
                                     <Transition name="btn-icon-fade">
                                         <svg v-if="currentAction === 'stop'" key="stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
@@ -404,12 +447,53 @@ defineExpose({
                 @request-preview="openRequestPreview"
                 @add-block="() => {}"
             />
+            <input type="file" ref="imageInput" accept="image/png, image/jpeg, image/webp" style="display: none" @change="onImageSelected" />
         </div>
     </div>
     <RequestPreviewSheet ref="requestPreviewSheet" />
 </template>
 
 <style scoped>
+.attached-image-preview {
+    position: relative;
+    align-self: flex-start;
+    margin-bottom: 8px;
+    margin-left: 18px;
+    border-radius: 12px;
+    overflow: hidden;
+    max-width: 150px;
+    max-height: 150px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+}
+.attached-image-preview img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    display: block;
+}
+.remove-image-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: white;
+}
+.remove-image-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
 .chat-input-container {
     position: relative;
     display: flex;

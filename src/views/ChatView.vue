@@ -841,7 +841,7 @@ function smartScroll() {
     }
 }
 
-async function sendMessage() {
+async function sendMessage(attachedImage = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
         const state = generatingStates[activeChatChar.id];
@@ -863,7 +863,8 @@ async function sendMessage() {
     }
 
     const text = inputValue.value.trim();
-    if (text) {
+    const hasImage = typeof attachedImage === 'string';
+    if (text || hasImage) {
 
         const now = new Date();
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -883,6 +884,10 @@ async function sendMessage() {
             tokens: estimateTokens(processedText),
             persona: { name: persona.name, id: persona.id } 
         };
+        
+        if (hasImage) {
+            msgData.image = attachedImage;
+        }
         
         currentMessages.value.push(msgData);
         if (activeChatChar) {
@@ -1182,6 +1187,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             role: m.role === 'user' ? 'user' : 'assistant', 
             content: m.text || "", 
             text: m.text || "", 
+            image: m.image || null,
             chatId: m.originalIndex 
         }));
 

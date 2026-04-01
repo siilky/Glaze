@@ -254,6 +254,14 @@ export async function generateChatResponse({
             role: m.role,
             content: m.content
         };
+
+        if (m.image) {
+            cleanMsg.content = [
+                { type: "text", text: m.content || "" },
+                { type: "image_url", image_url: { url: m.image } }
+            ];
+        }
+
         if (m.name) cleanMsg.name = m.name;
         return cleanMsg;
     });
