@@ -349,7 +349,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 }
 
 function buildPromptMessagesWorker(args) {
-    const { char, history, summary, activePreset, mergePrompts, mergeRole, personaObj, authorsNote, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    const { char, history, summary, activePreset, mergePrompts, mergeRole, personaObj, authorsNote, guidanceText, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
 
     const messages = [];
     let mergeBuffer = [];
@@ -564,6 +564,14 @@ function buildPromptMessagesWorker(args) {
         if (m.isHistory) return true;
         return m.content && m.content.trim().length > 0;
     });
+
+    if (guidanceText) {
+        filteredMessages.push({
+            role: 'system',
+            content: `[System Note: ${guidanceText}]`,
+            blockName: 'Guided Generation'
+        });
+    }
 
     return { messages: filteredMessages, loreEntries: allLoreEntries, notifyObj };
 }

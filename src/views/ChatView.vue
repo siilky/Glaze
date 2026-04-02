@@ -72,6 +72,7 @@ let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
 let cutoffRerunTimer = null;
+const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
 let ignoreScrollAdjustmentTimer = null;
@@ -585,9 +586,13 @@ async function openChat(char, onBack) {
                 if (lastMsg.swipesMeta && lastMsg.swipesMeta[newSwipeId]) {
                     lastMsg.reasoning = lastMsg.swipesMeta[newSwipeId].reasoning;
                     lastMsg.genTime = lastMsg.swipesMeta[newSwipeId].genTime;
+                    lastMsg.guidanceText = lastMsg.swipesMeta[newSwipeId].guidanceText || null;
+                    lastMsg.guidanceType = lastMsg.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
                 } else {
                     lastMsg.reasoning = null;
                     lastMsg.genTime = null;
+                    lastMsg.guidanceText = null;
+                    lastMsg.guidanceType = 'GENERATION';
                 }
                 dirty = true;
                 break;
@@ -841,7 +846,7 @@ function smartScroll() {
     }
 }
 
-async function sendMessage(attachedImage = null) {
+async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
         const state = generatingStates[activeChatChar.id];
@@ -862,9 +867,18 @@ async function sendMessage(attachedImage = null) {
         return;
     }
 
+    let effectiveGuidance = guidanceText;
+    let effectiveGuidanceType = 'GENERATION';
+
+    if (!effectiveGuidance && pendingGuidance.value) {
+        effectiveGuidance = pendingGuidance.value.text;
+        effectiveGuidanceType = pendingGuidance.value.type;
+        pendingGuidance.value = null;
+    }
+
     const text = inputValue.value.trim();
     const hasImage = typeof attachedImage === 'string';
-    if (text || hasImage) {
+    if (text || hasImage || effectiveGuidance) {
 
         const now = new Date();
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -880,15 +894,13 @@ async function sendMessage(attachedImage = null) {
             role: 'user', 
             text: processedText, 
             time: time, 
-            timestamp: Date.now(), 
+            timestamp: now.getTime(),
+            image: attachedImage, 
             tokens: estimateTokens(processedText),
-            persona: { name: persona.name, id: persona.id } 
+            persona: { ...activePersona.value },
+            guidanceText: effectiveGuidance,
+            guidanceType: effectiveGuidanceType
         };
-        
-        if (hasImage) {
-            msgData.image = attachedImage;
-        }
-        
         currentMessages.value.push(msgData);
         if (activeChatChar) {
             const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
@@ -909,14 +921,14 @@ async function sendMessage(attachedImage = null) {
         });
         
         if (activeChatChar) {
-            startGeneration(activeChatChar, null);
+            startGeneration(activeChatChar, null, -1, null, effectiveGuidance, effectiveGuidanceType);
         }
     }
 }
 
 // --- Generation Logic ---
 
-function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
+function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guidanceText = null, guidanceType = 'GENERATION') {
     // Check API Configuration
     const model = localStorage.getItem('api-model');
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
@@ -1004,7 +1016,9 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             timestamp: Date.now(),
             swipes: [""],
             swipeId: 0,
-            isTyping: true // Custom flag for UI
+            isTyping: true, // Custom flag for UI
+            guidanceText,
+            guidanceType
         };
         currentMessages.value.push(msg);
         msgIndex = currentMessages.value.length - 1;
@@ -1017,6 +1031,16 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }
 
     // Get unique ID to identify message across re-mounts
+    if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
+        const msg = currentMessages.value[msgIndex];
+        msg.guidanceText = guidanceText;
+        msg.guidanceType = guidanceType;
+        // Force fallback to message-level guidance by clearing current swipe's metadata if it exists
+        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
+            msg.swipesMeta[msg.swipeId || 0].guidanceText = null;
+            msg.swipesMeta[msg.swipeId || 0].guidanceType = null;
+        }
+    }
     const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
 
     // Save generation status for DialogList
@@ -1081,6 +1105,16 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                     
                     msg.swipeId = newSwipeId;
                     msg.text = msg.swipes[newSwipeId] || "";
+                    
+                    // Restore guidance from the reverted swipe's meta
+                    if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
+                        msg.guidanceText = msg.swipesMeta[newSwipeId].guidanceText || null;
+                        msg.guidanceType = msg.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
+                    } else {
+                        msg.guidanceText = null;
+                        msg.guidanceType = 'GENERATION';
+                    }
+                    
                     if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
                         msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
                         msg.genTime = msg.swipesMeta[newSwipeId].genTime;
@@ -1230,6 +1264,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
         history,
         authorsNote,
         summary,
+        guidanceText,
         type: 'normal',
         controller,
         callbacks: {
@@ -1311,7 +1346,13 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             // If this was a new generation (not a swipe add), it's the first swipe
             if (msg.swipes.length === 1 && msg.swipes[0] === "") {
                 msg.swipes[0] = response;
-                msg.swipesMeta[0] = { genTime: duration, reasoning: finalReasoning, tokens: msg.tokens };
+                msg.swipesMeta[0] = { 
+                    genTime: duration, 
+                    reasoning: finalReasoning, 
+                    tokens: msg.tokens,
+                    guidanceText: msg.guidanceText,
+                    guidanceType: msg.guidanceType
+                };
                 addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
             } else {
                 msg.swipes[msg.swipeId || 0] = response;
@@ -1319,6 +1360,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                 msg.swipesMeta[msg.swipeId || 0].genTime = duration;
                 msg.swipesMeta[msg.swipeId || 0].reasoning = finalReasoning;
                 msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
+                msg.swipesMeta[msg.swipeId || 0].guidanceText = guidanceText;
+                msg.swipesMeta[msg.swipeId || 0].guidanceType = guidanceType;
                 addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
             }
             
@@ -1390,7 +1433,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }
 }
 
-function regenerateMessage(msgIndex, mode = 'normal') {
+function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
     if (msgIndex === -1) return;
     const msg = currentMessages.value[msgIndex];
     const isUser = msg.role === 'user';
@@ -1405,12 +1448,13 @@ function regenerateMessage(msgIndex, mode = 'normal') {
             msg.swipes[msg.swipeId || 0] = "";
         }
         updateSessionMessage(activeChatChar, msgIndex, msg);
-        startGeneration(activeChatChar, null, msgIndex);
+        startGeneration(activeChatChar, null, msgIndex, null, guidanceText, 'SWIPE');
         return;
     }
 
     if (mode === 'magic' && isUser) {
-        startGeneration(activeChatChar, null);
+        // Inherit guidance from the user message if it exists
+        startGeneration(activeChatChar, null, -1, null, msg.guidanceText, 'GENERATION');
         return;
     }
 
@@ -1418,7 +1462,7 @@ function regenerateMessage(msgIndex, mode = 'normal') {
         mode = 'new_variant';
     }
 
-    if (mode === 'new_variant' && !isUser) {
+    if ((mode === 'new_variant' || mode === 'guided') && !isUser) {
         // Add new swipe
         const newSwipeIndex = (msg.swipes?.length || 0);
         if (!msg.swipes) msg.swipes = [msg.text];
@@ -1428,7 +1472,7 @@ function regenerateMessage(msgIndex, mode = 'normal') {
         msg.reasoning = null;
         msg.isTyping = true;
         
-        startGeneration(activeChatChar, null, msgIndex);
+        startGeneration(activeChatChar, null, msgIndex, null, guidanceText || msg.guidanceText, mode === 'guided' ? 'SWIPE' : (msg.guidanceType || 'GENERATION'));
     } else {
         // Delete and regen (simplified for Vue: remove subsequent, then regen)
         // In Vue we just slice the array
@@ -1441,7 +1485,7 @@ function regenerateMessage(msgIndex, mode = 'normal') {
             }
         });
         
-        startGeneration(activeChatChar, null);
+        startGeneration(activeChatChar, null, -1, null, guidanceText, 'GENERATION');
     }
 }
 
@@ -1797,7 +1841,12 @@ function cancelEdit(msg) {
 
 // --- Magic Menu ---
 
-async function startImpersonation() {
+async function startImpersonation(guidanceText = null) {
+    if (guidanceText) {
+        pendingGuidance.value = { text: guidanceText, type: 'IMPERSONATION' };
+    } else {
+        pendingGuidance.value = null;
+    }
     if (!activeChatChar) return;
     const charId = activeChatChar.id;
     
@@ -1847,6 +1896,7 @@ async function startImpersonation() {
         text: promptText,
         char: activeChatChar,
         history,
+        guidanceText,
         type: 'impersonation',
         controller,
         callbacks: {
@@ -2425,7 +2475,7 @@ onUnmounted(() => {
                     :is-selected="selectedMessages.has(vItem.item.data.timestamp)"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
-                    @regenerate="(mode) => regenerateMessage(vItem.item.originalIndex, mode)"
+                    @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
                     @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"

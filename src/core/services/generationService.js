@@ -96,6 +96,7 @@ export async function generateChatResponse({
     history,
     authorsNote,
     summary,
+    guidanceText,
     type = 'normal',
     controller,
     callbacks
@@ -171,6 +172,7 @@ export async function generateChatResponse({
             mergeRole,
             personaObj,
             authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+            guidanceText,
             lorebooks: lorebookState.lorebooks,
             globalSettings: lorebookState.globalSettings,
             activations: lorebookState.activations,

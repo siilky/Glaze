@@ -569,5 +569,11 @@
     "stats_time_app": "App Time Spent (Focus)",
     "stats_first_msg": "First Message",
     "menu_characters": "Character",
-    "search_messages": "Search messages"
+    "search_messages": "Search messages",
+    "guided_generation": "GUIDED GENERATION",
+    "guided_swipe": "GUIDED SWIPE",
+    "guided_impersonation": "GUIDED IMPERSONATION",
+    "guided_swipe_placeholder": "Instruction...",
+    "guidance_placeholder": "Instruction...",
+    "impersonate_guidance_placeholder": "Instruction (optional)..."
 }

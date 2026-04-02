@@ -575,5 +575,11 @@
     "stats_time_app": "Время в приложении (в фокусе)",
     "stats_first_msg": "Первое сообщение",
     "menu_characters": "Персонаж",
-    "search_messages": "Поиск сообщений"
+    "search_messages": "Поиск сообщений",
+    "guided_generation": "НАПРАВЛЕННАЯ ГЕНЕРАЦИЯ",
+    "guided_swipe": "НАПРАВЛЕННЫЙ СВАЙП",
+    "guided_impersonation": "НАПРАВЛЕННАЯ ИМПЕРСОНИЗАЦИЯ",
+    "impersonate_guidance_placeholder": "Инструкция (опционально)...",
+    "guidance_placeholder": "Инструкция...",
+    "guided_swipe_placeholder": "Инструкция..."
 }

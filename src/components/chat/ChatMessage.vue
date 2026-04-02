@@ -34,6 +34,55 @@ const emit = defineEmits([
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang]?.[key] || key;
 
+const isGuidedSwipeOpen = ref(false);
+const guidedSwipeText = ref('');
+const guidedSwipeInput = ref(null);
+
+const toggleGuidedSwipe = () => {
+    isGuidedSwipeOpen.value = !isGuidedSwipeOpen.value;
+    if (isGuidedSwipeOpen.value) {
+        nextTick(() => { if (guidedSwipeInput.value) guidedSwipeInput.value.focus(); });
+    } else {
+        guidedSwipeText.value = '';
+    }
+};
+
+const submitGuidedSwipe = () => {
+    emit('regenerate', 'guided', guidedSwipeText.value);
+    isGuidedSwipeOpen.value = false;
+    guidedSwipeText.value = '';
+};
+
+const currentGuidance = computed(() => {
+    // If it's a character message, ONLY show if it's explicitly a SWIPE
+    if (props.message.role === 'char') {
+        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
+        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
+            return {
+                text: meta.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        // Fallback for typing/initial swipe state
+        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
+            return {
+                text: props.message.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        return null; // Don't show redundant headers for GENERATION or IMPERSONATION on bot side
+    }
+
+    // User message: Show if it has any guidance
+    if (props.message.role === 'user' && props.message.guidanceText) {
+        return {
+            text: props.message.guidanceText,
+            type: props.message.guidanceType || 'GENERATION'
+        };
+    }
+    return null;
+});
+
 // --- Helpers ---
 const getAvatar = () => {
     if (props.message.role === 'user') {
@@ -447,7 +496,13 @@ onUnmounted(() => {
                         </div>
                         <ShadowContent class="error-content" :html="formatMessageText(message.text)" :is-selected="isSelected" />
                     </div>
-                    <ShadowContent v-else :html="combinedMessageData.html" :is-selected="isSelected" />
+                    <template v-else>
+                        <div v-if="currentGuidance" class="msg-guidance-block">
+                            <div class="guidance-label">GUIDED {{ currentGuidance.type }}</div>
+                            <div class="guidance-content">{{ currentGuidance.text }}</div>
+                        </div>
+                        <ShadowContent :html="combinedMessageData.html" :is-selected="isSelected" />
+                    </template>
                     
                     <div v-if="message.image" class="msg-image-attachment">
                         <img :src="message.image" alt="Attached image" />
@@ -478,6 +533,11 @@ onUnmounted(() => {
                 
                 <!-- Typing Indicator -->
                 <div class="msg-body" v-else key="typing">
+                    <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 8px;">
+                        <div class="guidance-label">GUIDED {{ currentGuidance.type }}</div>
+                        <div class="guidance-content">{{ currentGuidance.text }}</div>
+                    </div>
+
                     <div class="typing-container">
                         <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                         <span class="typing-text">{{ t('model_typing') }}</span>
@@ -558,6 +618,10 @@ onUnmounted(() => {
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
 
+                <div class="msg-guided-swipe-btn" v-if="message.role === 'char' && !isGenerating && !message.isEditing && isLast" :class="{ 'active': isGuidedSwipeOpen }" @click.stop="toggleGuidedSwipe" :title="t('guided_swipe') || 'Guided Swipe'">
+                    <svg viewBox="0 0 24 24"><path d="M9 5v2h6.59L4 18.59 5.41 20 17 8.41V15h2V5H9z"/></svg>
+                </div>
+
                 <!-- Regenerate Button (User or Error) -->
                 <div class="msg-regenerate" v-if="((message.role === 'user' && isLast) || message.isError) && !isGenerating && !message.isEditing" @click.stop="emit('regenerate', 'magic')" :class="{'icon-only': (message.role === 'char' && ((message.swipes && message.swipes.length > 1) || (index === 0 && getAllGreetings(activeChatChar).length > 1)))}">
                     <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
@@ -580,6 +644,27 @@ onUnmounted(() => {
                 <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
             </div>
 
+        </div>
+
+        <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
+            <div class="guidance-main">
+                <div class="guidance-header">{{ t('guided_swipe') || 'GUIDED SWIPE' }}</div>
+                <textarea 
+                    class="guided-swipe-textarea"
+                    v-model="guidedSwipeText"
+                    :placeholder="t('guided_swipe_placeholder') || 'Enter OOC instruction for swipe...'"
+                    rows="1"
+                    ref="guidedSwipeInput"
+                ></textarea>
+            </div>
+            <div class="guided-swipe-actions">
+                <div class="guided-btn cancel" @click.stop="toggleGuidedSwipe">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </div>
+                <div class="guided-btn confirm" @click.stop="submitGuidedSwipe">
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -911,6 +996,28 @@ onUnmounted(() => {
 }
 .msg-regenerate svg { width: 14px; height: 14px; fill: currentColor; }
 
+.msg-guided-swipe-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border-radius: 12px;
+    padding: 2px 6px;
+    color: var(--text-gray);
+    height: 22px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.msg-guided-swipe-btn.active {
+    background-color: var(--vk-blue);
+    color: white;
+    border-color: var(--vk-blue);
+}
+.msg-guided-swipe-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
 .msg-actions-btn {
     justify-self: end;
     padding: 4px;
@@ -1024,6 +1131,77 @@ onUnmounted(() => {
 .edit-btn svg { width: 16px; height: 16px; }
 .edit-btn.save svg { fill: #4CAF50; }
 .edit-btn.cancel svg { fill: #ff4444; }
+
+/* Guided Swipe Inline Block */
+.guided-swipe-container {
+    margin-top: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.9));
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    border-radius: 0 !important;
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    animation: slideDownFade 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.guidance-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.guidance-header {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.guided-swipe-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-black);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    field-sizing: content;
+    padding: 4px 0;
+    max-height: 120px;
+    min-height: 20px;
+}
+.guided-swipe-textarea::-webkit-scrollbar { display: none; }
+.guided-swipe-textarea { -ms-overflow-style: none; scrollbar-width: none; }
+.guided-swipe-textarea::placeholder { color: var(--text-gray); }
+
+.guided-swipe-actions {
+    display: flex;
+    gap: 8px;
+}
+.guided-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.03);
+    transition: all 0.2s ease;
+}
+.guided-btn:active { transform: scale(0.9); background-color: rgba(0, 0, 0, 0.1); }
+.guided-btn.confirm { color: #4CAF50; }
+.guided-btn.cancel { color: #ff4444; }
+.guided-btn svg { width: 16px; height: 16px; fill: currentColor; }
+:global(body.dark-theme) .guided-swipe-textarea { color: #fff; }
 
 /* Dark Theme */
 :global(body.dark-theme) .msg-body { color: var(--current-text-color, #e1e3e6); }
@@ -1306,5 +1484,35 @@ body.dark-theme .error-content {
     opacity: 0.45;
 }
 
-
+/* Guidance Block Styling */
+.msg-guidance-block {
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--vk-blue);
+    background: rgba(var(--vk-blue-rgb), 0.05);
+    border-radius: 4px;
+    font-size: 13px;
+    width: fit-content;
+    max-width: 100%;
+}
+.guidance-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    margin-bottom: 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+.guidance-content {
+    color: var(--text-dark-gray);
+    line-height: 1.4;
+    font-size: 12px;
+    font-style: italic;
+}
+:global(body.dark-theme) .msg-guidance-block {
+    background: rgba(var(--vk-blue-rgb), 0.1);
+}
+:global(body.dark-theme) .guidance-content {
+    color: #ccc;
+}
 </style>

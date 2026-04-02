@@ -39,6 +39,28 @@ const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
 const isSwitchingToDrawer = ref(false);
 const inputWrapper = ref(null);
 const kbListeners = [];
+const isMainFocused = ref(false);
+const isGuidanceFocused = ref(false);
+
+const isGuidanceMode = ref(false);
+const guidanceType = ref('send');
+const guidanceText = ref('');
+const guidanceInput = ref(null);
+
+const closeGuidance = () => {
+    isGuidanceMode.value = false;
+    guidanceText.value = '';
+};
+
+const toggleGuidanceMode = () => {
+    if (isGuidanceMode.value && guidanceType.value === 'send') {
+        closeGuidance();
+    } else {
+        isGuidanceMode.value = true;
+        guidanceType.value = 'send';
+        nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
+    }
+};
 
 const currentAction = computed(() => {
     if (props.isGenerating) return 'stop';
@@ -73,10 +95,18 @@ const handleSend = () => {
     if (props.isGenerating) {
         emit('send');
     } else if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) {
-        emit('send', attachedImage.value);
+        emit('send', attachedImage.value, guidanceText.value);
         attachedImage.value = null;
+        closeGuidance();
     } else {
-        emit('magic-impersonate');
+        if (!isGuidanceMode.value || guidanceType.value !== 'impersonate') {
+            isGuidanceMode.value = true;
+            guidanceType.value = 'impersonate';
+            nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
+        } else {
+            emit('magic-impersonate', guidanceText.value);
+            closeGuidance();
+        }
     }
 };
 
@@ -275,8 +305,21 @@ const toggleMagicMenu = async () => {
 };
 
 const onFocus = () => {
+    isMainFocused.value = true;
     // Close drawer when user focuses input to type
     // isMagicMenuVisible.value = false; // Don't close, let keyboard cover it
+};
+
+const onBlur = () => {
+    isMainFocused.value = false;
+};
+
+const onGuidanceFocus = () => {
+    isGuidanceFocused.value = true;
+};
+
+const onGuidanceBlur = () => {
+    isGuidanceFocused.value = false;
 };
 
 const closeMagicMenu = (e) => {
@@ -362,7 +405,24 @@ defineExpose({
                             <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </div>
                     </div>
-                    <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode">
+                    <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode" :class="{ 'with-guidance': isGuidanceMode && guidanceType === 'send' }">
+                        <div v-if="isGuidanceMode && guidanceType === 'send'" class="guidance-input-container" :class="{ 'dimmed': isMainFocused }">
+                            <div class="guidance-main">
+                                <div class="guidance-header">{{ t('guided_generation') || 'GUIDED GENERATION' }}</div>
+                                <textarea
+                                    class="guidance-editable"
+                                    v-model="guidanceText"
+                                    :placeholder="t('guidance_placeholder') || 'System Instruction...'"
+                                    rows="1"
+                                    ref="guidanceInput"
+                                    @focus="onGuidanceFocus"
+                                    @blur="onGuidanceBlur"
+                                ></textarea>
+                            </div>
+                            <div class="close-guidance-btn" @click.stop="closeGuidance">
+                                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </div>
+                        </div>
                         <template v-if="isSearchMode">
                             <div class="search-counts-wrapper">
                                 <div style="color: var(--text-gray); font-size: 16px; font-weight: 500;">
@@ -378,8 +438,28 @@ defineExpose({
                                 </div>
                             </div>
                         </template>
+                        <div v-else-if="isGuidanceMode && guidanceType === 'impersonate'" class="impersonate-inline-container" :class="{ 'dimmed': isMainFocused }">
+                            <div class="guidance-main" style="width: 100%;">
+                                <div class="guidance-header">{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}</div>
+                                <textarea
+                                    class="guidance-editable"
+                                    v-model="guidanceText"
+                                    :placeholder="t('impersonate_guidance_placeholder') || 'Instruction (optional)...'"
+                                    rows="1"
+                                    ref="guidanceInput"
+                                    @input="resizeTextarea"
+                                    @keydown="onKeyDown"
+                                    @focus="onGuidanceFocus"
+                                    @blur="onGuidanceBlur"
+                                    style="font-size: 16px; padding: 0; min-height: 24px;"
+                                ></textarea>
+                            </div>
+                            <div class="close-guidance-btn" @click.stop="closeGuidance" style="margin-left: 12px; margin-top: auto; margin-bottom: auto; background: transparent;">
+                                <svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </div>
+                        </div>
                         <template v-else>
-                            <div id="chat-input" ref="chatInput" class="chat-input-editable" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
+                            <div id="chat-input" ref="chatInput" class="chat-input-editable" :class="{'dimmed': isGuidanceMode && !isMainFocused}" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @blur="onBlur" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
                             <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;"><svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span></div>
                         </template>
                     </div>
@@ -413,6 +493,9 @@ defineExpose({
                             <div class="chat-btn circle-btn" @click.stop="openFullScreenEditor">
                                 <svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
                             </div>
+                            <div class="chat-btn circle-btn" :class="{ 'active': isGuidanceMode && guidanceType === 'send' }" @click.stop="toggleGuidanceMode">
+                                <svg viewBox="0 0 24 24"><path d="M9 5v2h6.59L4 18.59 5.41 20 17 8.41V15h2V5H9z"/></svg>
+                            </div>
                         </div>
 
                         <div class="send-btn-wrapper">
@@ -420,6 +503,7 @@ defineExpose({
                                 <div class="btn-icon-wrapper">
                                     <Transition name="btn-icon-fade">
                                         <svg v-if="currentAction === 'stop'" key="stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                                        <svg v-else-if="isGuidanceMode" key="confirm" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                         <svg v-else-if="currentAction === 'send'" key="send" viewBox="0 0 24 24" style="margin-left: 2px;"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                                         <svg v-else key="impersonate" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
                                     </Transition>
@@ -683,6 +767,7 @@ defineExpose({
     position: relative;
     flex: 1;
     display: flex;
+    flex-direction: column;
     overflow: hidden;
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
@@ -799,6 +884,99 @@ defineExpose({
     flex-shrink: 0;
     overflow: hidden;
 }
+
+/* Guidance CSS */
+.guidance-input-container {
+    display: flex;
+    align-items: center;
+    background: transparent;
+    border-bottom: 1px dashed var(--border-color, rgba(0,0,0,0.1));
+    padding: 8px 8px 8px 18px;
+    animation: slideDownFade 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    flex-shrink: 0;
+}
+
+.guidance-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.guidance-header {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.guidance-editable {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-black);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    field-sizing: content;
+    padding: 0;
+    margin: 0;
+    line-height: inherit;
+    min-height: 20px;
+    max-height: 80px;
+    border-radius: 0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.guidance-editable::-webkit-scrollbar { display: none; }
+.guidance-editable { -ms-overflow-style: none; scrollbar-width: none; }
+
+.guidance-editable::placeholder { color: var(--text-gray); }
+
+.close-guidance-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.05);
+    color: var(--text-gray);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.close-guidance-btn:active { background: rgba(0,0,0,0.1); }
+.close-guidance-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+.impersonate-inline-container {
+    display: flex;
+    align-items: center;
+    padding: 12px 18px;
+    width: 100%;
+}
+
+.circle-btn.active {
+    background-color: var(--vk-blue) !important;
+    color: white !important;
+    border-color: var(--vk-blue) !important;
+}
+.circle-btn.active svg { fill: white !important; }
+
+.chat-input-editable.dimmed,
+.impersonate-inline-container.dimmed,
+.guidance-input-container.dimmed {
+    opacity: 0.5;
+}
+
+@keyframes slideDownFade {
+    0% { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+    100% { opacity: 1; max-height: 100px; }
+}
+
+:global(body.dark-theme) .guidance-editable { color: #fff; }
 
 .chat-action-btn:active {
     transform: scale(0.95);
