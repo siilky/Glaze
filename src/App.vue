@@ -451,6 +451,79 @@ const updateLayoutMetrics = () => {
 
 let layoutObserver = null;
 
+const onOpenCharacterEditor = (e) => { openCharacterEditor(e.detail.index); };
+
+const onOpenPersonaEditor = (e) => {
+    previousViewForEditor.value = currentView.value;
+    if (currentView.value === 'view-chat') {
+        shouldOpenPersonasOnReturn.value = true;
+    }
+    isDeleting.value = false;
+    editingPersonaIndex.value = e.detail.index;
+    editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
+    currentView.value = 'view-persona-edit';
+};
+
+const onNavigateTo = (e) => { currentView.value = e.detail; };
+
+const onOpenOnboarding = () => { isOnboarding.value = true; };
+
+const onTriggerOpenImage = (e) => {
+    const { src, name, description, onCloseCallback } = e.detail;
+    logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode);
+    if (imageViewerMode === 'holo' || imageViewerMode === 'holocards') {
+        window.dispatchEvent(new CustomEvent('open-holocards', {
+            detail: { src, name, description, onCloseCallback }
+        }));
+    } else {
+        logger.debug('[App] Dispatching open-image-viewer');
+        window.dispatchEvent(new CustomEvent('open-image-viewer', {
+            detail: { src, onCloseCallback }
+        }));
+    }
+};
+
+const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
+
+const onOpenConnections = (e) => {
+    const { type, id, name } = e.detail || {};
+    waitForComponent(connectionsSheetRef, (comp) => {
+        comp.open(type, id, name, activeChatCharObj.value);
+    });
+};
+
+const onOpenItemEditor = (e) => {
+    const { type, id } = e.detail;
+    if (type === 'lorebook') {
+        waitForComponent(lorebookSheetRef, (comp) => {
+            comp.openLorebook(id);
+        });
+    } else if (type === 'preset') {
+        waitForComponent(presetViewRef, (comp) => {
+            comp.openPreset(id);
+        });
+    } else if (type === 'persona') {
+        const index = allPersonas.value.findIndex(p => p.id === id);
+        if (index !== -1) {
+            const persona = allPersonas.value[index];
+            window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
+        }
+    }
+};
+
+const onOpenLorebookEntry = (e) => {
+    const { lorebookId, entryId } = e.detail;
+    if (currentView.value === 'view-chat') {
+        waitForComponent(chatViewRef, (comp) => {
+            comp.openLorebookEntry(lorebookId, entryId);
+        });
+    }
+};
+
+const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
+const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
+const onHeaderReset = () => { isHeaderEditorMode.value = false; };
+
 const handleOpenChatEvent = async (e) => {
     logger.debug("[App] Received open-chat event:", e.detail);
     const data = e.detail;
@@ -499,91 +572,26 @@ onMounted(async () => {
 
     
     // Listen for editor events
-    window.addEventListener('open-character-editor', (e) => {
-        openCharacterEditor(e.detail.index);
-    });
-
-    window.addEventListener('open-persona-editor', (e) => {
-        previousViewForEditor.value = currentView.value;
-        if (currentView.value === 'view-chat') {
-            shouldOpenPersonasOnReturn.value = true;
-        }
-        isDeleting.value = false;
-        editingPersonaIndex.value = e.detail.index;
-        editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
-        currentView.value = 'view-persona-edit';
-    });
-
-    window.addEventListener('navigate-to', (e) => {
-        currentView.value = e.detail;
-    });
-
+    window.addEventListener('open-character-editor', onOpenCharacterEditor);
+    window.addEventListener('open-persona-editor', onOpenPersonaEditor);
+    window.addEventListener('navigate-to', onNavigateTo);
     window.addEventListener('language-changed', onLanguageChanged);
     window.addEventListener('open-chat', handleOpenChatEvent);
-    window.addEventListener('open-onboarding', () => { isOnboarding.value = true; });
+    window.addEventListener('open-onboarding', onOpenOnboarding);
 
     const pendingData = consumePendingNotificationData();
     if (pendingData) {
         handleOpenChatEvent({ detail: pendingData });
     }
 
-    window.addEventListener('trigger-open-image', (e) => {
-        const { src, name, description, onCloseCallback } = e.detail;
-        logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode);
-        if (imageViewerMode === 'holo' || imageViewerMode === 'holocards') {
-            window.dispatchEvent(new CustomEvent('open-holocards', { 
-                detail: { src, name, description, onCloseCallback } 
-            }));
-        } else {
-            logger.debug('[App] Dispatching open-image-viewer');
-            window.dispatchEvent(new CustomEvent('open-image-viewer', { 
-                detail: { src, onCloseCallback } 
-            }));
-        }
-    });
-
-    window.addEventListener('open-fs-request', (e) => {
-        openFsEditor(e.detail);
-    });
-
-    window.addEventListener('open-connections', (e) => {
-        const { type, id, name } = e.detail || {};
-        waitForComponent(connectionsSheetRef, (comp) => {
-            comp.open(type, id, name, activeChatCharObj.value);
-        });
-    });
-
-    window.addEventListener('open-item-editor', (e) => {
-        const { type, id } = e.detail;
-        if (type === 'lorebook') {
-            waitForComponent(lorebookSheetRef, (comp) => {
-                comp.openLorebook(id);
-            });
-        } else if (type === 'preset') {
-            waitForComponent(presetViewRef, (comp) => {
-                comp.openPreset(id);
-            });
-        } else if (type === 'persona') {
-            const index = allPersonas.value.findIndex(p => p.id === id);
-            if (index !== -1) {
-                const persona = allPersonas.value[index];
-                window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
-            }
-        }
-    });
-
-    window.addEventListener('open-lorebook-entry', (e) => {
-        const { lorebookId, entryId } = e.detail;
-        if (currentView.value === 'view-chat') {
-            waitForComponent(chatViewRef, (comp) => {
-                comp.openLorebookEntry(lorebookId, entryId);
-            });
-        }
-    });
-
-    window.addEventListener('header-setup-editor', () => { isHeaderEditorMode.value = true; });
-    window.addEventListener('header-setup-generation', () => { isHeaderEditorMode.value = false; });
-    window.addEventListener('header-reset', () => { isHeaderEditorMode.value = false; });
+    window.addEventListener('trigger-open-image', onTriggerOpenImage);
+    window.addEventListener('open-fs-request', onOpenFsRequest);
+    window.addEventListener('open-connections', onOpenConnections);
+    window.addEventListener('open-item-editor', onOpenItemEditor);
+    window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.addEventListener('header-setup-editor', onHeaderSetupEditor);
+    window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
+    window.addEventListener('header-reset', onHeaderReset);
 
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
@@ -616,8 +624,20 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
     if (layoutObserver) layoutObserver.disconnect();
-    window.removeEventListener('open-chat', handleOpenChatEvent);
+    window.removeEventListener('open-character-editor', onOpenCharacterEditor);
+    window.removeEventListener('open-persona-editor', onOpenPersonaEditor);
+    window.removeEventListener('navigate-to', onNavigateTo);
     window.removeEventListener('language-changed', onLanguageChanged);
+    window.removeEventListener('open-chat', handleOpenChatEvent);
+    window.removeEventListener('open-onboarding', onOpenOnboarding);
+    window.removeEventListener('trigger-open-image', onTriggerOpenImage);
+    window.removeEventListener('open-fs-request', onOpenFsRequest);
+    window.removeEventListener('open-connections', onOpenConnections);
+    window.removeEventListener('open-item-editor', onOpenItemEditor);
+    window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
+    window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
+    window.removeEventListener('header-reset', onHeaderReset);
     kbListeners.forEach(l => l.remove());
 });
 
