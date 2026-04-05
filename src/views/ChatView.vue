@@ -48,6 +48,7 @@ import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages } from '@/core/services/imageGenService.js';
+import { showToast } from '@/core/states/toastState.js';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -723,6 +724,7 @@ async function openChat(char, onBack, force = false) {
             }, 50);
             messagesContainer.value.addEventListener('scroll', onScroll);
             onScroll({ target: messagesContainer.value });
+            applyImageAutoHide();
         }
         // updateInputPreview(); // Handled by ChatInput component
 
@@ -1261,7 +1263,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             role: m.role === 'user' ? 'user' : 'assistant', 
             content: m.text || "", 
             text: m.text || "", 
-            image: m.image || null,
+            image: (m.image && !m.imageHidden) ? m.image : null,
             chatId: m.originalIndex 
         }));
 
@@ -1890,6 +1892,12 @@ function cancelEdit(msg) {
     delete msg.editText;
 }
 
+function toggleImageHidden(msg, index) {
+    msg.imageHidden = !msg.imageHidden;
+    updateSessionMessage(activeChatChar, index, msg);
+    showToast(msg.imageHidden ? 'Изображение скрыто из контекста' : 'Изображение добавлено в контекст');
+}
+
 // --- Magic Menu ---
 
 async function startImpersonation(guidanceText = null) {
@@ -2256,6 +2264,38 @@ function openRegexSheet() {
     regexSheet.value?.open();
 }
 
+const applyImageAutoHide = () => {
+    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    
+    if (!autoHide || threshold <= 0 || !activeChatChar) return;
+
+    let changed = false;
+    let assistantCount = 0;
+    
+    // Iterate backwards to count assistant responses after user images
+    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
+        const msg = currentMessages.value[i];
+        if (msg.role === 'char' || msg.role === 'assistant') {
+            assistantCount++;
+        } else if (msg.role === 'user' && msg.image) {
+            if (assistantCount >= threshold && !msg.imageHidden) {
+                msg.imageHidden = true;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        getChatData(activeChatChar.id).then(data => {
+            if (data) {
+                data.sessions[data.currentId] = currentMessages.value;
+                db.saveChat(activeChatChar.id, data);
+            }
+        });
+    }
+};
+
 const restoreHeader = () => {
     if (activeChatChar) setupHeader(activeChatChar);
 };
@@ -2274,6 +2314,7 @@ const onGenerationEnded = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.charId) {
         isGenerating.value = false;
         isImpersonating.value = false;
+        applyImageAutoHide();
         updateContextCutoff();
     }
 };
@@ -2547,6 +2588,7 @@ onUnmounted(() => {
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
                     @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
+                    @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
                 />
             </template>
             <!-- paddingBottom - spacer for virtual list scroll offset -->

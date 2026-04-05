@@ -19,6 +19,7 @@ const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors
 
 const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
+import AppToast from '@/components/ui/AppToast.vue';
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
@@ -776,6 +777,9 @@ watch(currentView, () => {
 
     <!-- Standard Image Viewer -->
     <ImageViewer />
+
+    <!-- Toast -->
+    <AppToast />
   </div>
 
   <!-- Full Screen Editor (Managed by App.vue now) -->

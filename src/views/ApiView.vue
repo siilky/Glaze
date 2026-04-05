@@ -24,7 +24,9 @@ const apiSettings = reactive({
     contextSize: 32000,
     temp: 0.7,
     topP: 0.9,
-    stream: true
+    stream: true,
+    autoHideImages: false,
+    autoHideImagesN: 1
 });
 
 const showApiKey = ref(false);
@@ -54,6 +56,8 @@ function loadApiSettings() {
     apiSettings.temp = parseFloat(localStorage.getItem('gz_api_temp')) || 0.7;
     apiSettings.topP = parseFloat(localStorage.getItem('gz_api_topp')) || 0.9;
     apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
+    apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
 }
 
 function saveApiSetting(key, value) {
@@ -73,7 +77,9 @@ function saveApiSetting(key, value) {
             'api-context': 'context',
             'gz_api_temp': 'temp',
             'gz_api_topp': 'topp',
-            'gz_api_stream': 'stream'
+            'gz_api_stream': 'stream',
+            'gz_api_auto_hide_images': 'auto_hide_images',
+            'gz_api_auto_hide_images_n': 'auto_hide_images_n'
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -203,7 +209,9 @@ function createNewApiPreset() {
                     context: apiSettings.contextSize,
                     temp: apiSettings.temp,
                     topp: apiSettings.topP,
-                    stream: apiSettings.stream
+                    stream: apiSettings.stream,
+                    auto_hide_images: apiSettings.autoHideImages,
+                    auto_hide_images_n: apiSettings.autoHideImagesN
                 };
 
                 apiPresets.value.push(newPreset);
@@ -230,6 +238,9 @@ function applyApiPreset(p) {
     apiSettings.topP = p.topp;
     apiSettings.stream = p.stream;
     
+    apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
+    apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
+    
     saveApiSetting('api-endpoint', p.endpoint);
     saveApiSetting('api-key', p.key);
     saveApiSetting('api-model', p.model);
@@ -238,6 +249,8 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_temp', p.temp);
     saveApiSetting('gz_api_topp', p.topp);
     saveApiSetting('gz_api_stream', p.stream);
+    saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
+    saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
     
     checkConnection();
 }
@@ -519,6 +532,21 @@ onBeforeUnmount(() => {
                         <label data-i18n="label_context_size">Context Size</label>
                         <input type="number" v-model.number="apiSettings.contextSize" @input="onApiInput('api-context', $event.target.value)">
                     </div>
+
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }}</label>
+                            <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
+                    </div>
+
+                    <Transition name="fade-height">
+                        <div v-if="apiSettings.autoHideImages" class="settings-item" style="margin-top: 0; padding-top: 0;">
+                            <label>{{ t('label_auto_hide_images_n') || 'Responses count' }}</label>
+                            <input type="number" v-model.number="apiSettings.autoHideImagesN" @input="onApiInput('gz_api_auto_hide_images_n', $event.target.value)" min="1">
+                        </div>
+                    </Transition>
                 </div>
         </div>
     </SheetView>
