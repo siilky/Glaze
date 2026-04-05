@@ -22,6 +22,7 @@ const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageV
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
+const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
@@ -55,6 +56,7 @@ const characterListRef = ref(null);
 const chatViewRef = ref(null);
 const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
+const backupSheetRef = ref(null);
 const presetViewRef = ref(null);
 
 const isHeaderEditorMode = ref(false);
@@ -520,6 +522,12 @@ const onOpenLorebookEntry = (e) => {
     }
 };
 
+const onOpenBackupSheet = () => {
+    waitForComponent(backupSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
 const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
 const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
 const onHeaderReset = () => { isHeaderEditorMode.value = false; };
@@ -589,6 +597,7 @@ onMounted(async () => {
     window.addEventListener('open-connections', onOpenConnections);
     window.addEventListener('open-item-editor', onOpenItemEditor);
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.addEventListener('open-backup-sheet', onOpenBackupSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
@@ -635,6 +644,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-connections', onOpenConnections);
     window.removeEventListener('open-item-editor', onOpenItemEditor);
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
@@ -769,6 +779,7 @@ watch(currentView, () => {
 
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
+  <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
 
 </template>

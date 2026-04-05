@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue';
-import { db } from '@/utils/db.js';
+import { importFullBackupAsync } from '@/core/services/backupService.js';
 import { addPersona, allPersonas, deletePersona } from '@/core/states/personaState.js';
 import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets } from '@/core/config/APISettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import BackupSheet from '@/components/sheets/BackupSheet.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
@@ -19,65 +20,10 @@ const emit = defineEmits(['finish']);
 
 const currentSlide = ref(0);
 
+const backupSheet = ref(null);
+
 const triggerRestore = () => {
-    const input = document.getElementById('onboarding-restore-input');
-    if (input) input.click();
-};
-
-const handleRestoreFile = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    if (!confirm(t('confirm_restore') || "This will overwrite current data. Continue?")) {
-        event.target.value = '';
-        return;
-    }
-
-    showBottomSheet({
-        title: t('importing_data') || "Importing Data",
-        bigInfo: {
-            icon: '<div class="app-loader-spinner" style="margin: 0 auto; width: 48px; height: 48px;"></div>',
-            description: t('please_wait') || "Please wait, reading and importing application data...",
-            buttonText: t('btn_wait') || "Wait...",
-            onButtonClick: () => {}
-        }
-    });
-
-    setTimeout(() => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                await db.importFullBackupAsync(e.target.result);
-                
-                showBottomSheet({
-                    title: "Restore Complete",
-                    bigInfo: {
-                        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#4CAF50"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                        description: "Restore successful! The app will now reload to apply changes.",
-                        buttonText: t('btn_ok') || "OK",
-                        onButtonClick: () => {
-                             localStorage.setItem('glaze_onboarding_completed', 'true');
-                             window.location.reload();
-                        }
-                    }
-                });
-            } catch (err) {
-                console.error("Restore failed", err);
-                showBottomSheet({
-                    title: t('title_error') || "Error",
-                    bigInfo: {
-                        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                        description: "Restore failed: " + err.message,
-                        buttonText: t('btn_ok') || "OK",
-                        onButtonClick: () => closeBottomSheet()
-                    }
-                });
-            }
-        };
-        reader.readAsText(file);
-    }, 100);
-    
-    event.target.value = '';
+    if (backupSheet.value) backupSheet.value.open();
 };
 
 // Form Data
@@ -397,7 +343,6 @@ async function finish() {
                                     <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
                                     <span>{{ t('menu_import') || 'Backup' }}</span>
                                 </button>
-                                <input type="file" id="onboarding-restore-input" style="display: none" accept="*/*" @change="handleRestoreFile">
                             </div>
                             
                             <div class="intro-blocks-container">
@@ -501,6 +446,7 @@ async function finish() {
                 </button>
             </div>
         </div>
+        <BackupSheet ref="backupSheet" :z-index="10000" />
     </div>
 </template>
 
