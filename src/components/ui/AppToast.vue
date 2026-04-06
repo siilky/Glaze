@@ -36,7 +36,7 @@ import { toastState } from '@/core/states/toastState.js';
 }
 
 /* Dark theme */
-:global(body.dark-theme) .app-toast {
+:global(.dark-theme .app-toast) {
     background: rgba(240, 240, 240, 0.92);
     color: #111;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
