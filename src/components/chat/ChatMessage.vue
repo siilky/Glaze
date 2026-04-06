@@ -28,7 +28,8 @@ const props = defineProps({
 
 const emit = defineEmits([
     'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit', 
-    'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden'
+    'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
+    'save-guidance'
 ]);
 
 const triggeredItemsSheet = ref(null);
@@ -51,6 +52,23 @@ const submitGuidedSwipe = () => {
     emit('regenerate', 'guided', guidedSwipeText.value);
     isGuidedSwipeOpen.value = false;
     guidedSwipeText.value = '';
+};
+
+const isGuidanceEditing = ref(false);
+const guidanceEditText = ref('');
+
+const startGuidanceEdit = () => {
+    guidanceEditText.value = currentGuidance.value?.text || '';
+    isGuidanceEditing.value = true;
+};
+
+const cancelGuidanceEdit = () => {
+    isGuidanceEditing.value = false;
+};
+
+const saveGuidanceEdit = () => {
+    emit('save-guidance', guidanceEditText.value.trim() || null);
+    isGuidanceEditing.value = false;
 };
 
 const currentGuidance = computed(() => {
@@ -448,6 +466,39 @@ onUnmounted(() => {
             </span>
         </div>
 
+        <!-- Guidance Block (Header) -->
+        <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 4px; border-radius: 8px;">
+            <div class="guidance-label" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>GUIDED {{ currentGuidance.type }}</span>
+                <div style="display: flex; gap: 2px; align-items: center;">
+                    <div class="edit-btn inline-pencil" v-if="!isGuidanceEditing && !message.isEditing && !isGenerating" title="Edit instruction" @click.stop="startGuidanceEdit" style="width: 20px; height: 20px; background: transparent; border: none; box-shadow: none;">
+                        <svg viewBox="0 0 24 24" style="width: 13px; height: 13px; fill: currentColor; opacity: 0.6;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    </div>
+                    <div class="edit-btn inline-refresh" v-if="!isGenerating && message.role === 'char'" title="Regenerate swipe with this instruction" @click.stop="emit('regenerate', 'guided', currentGuidance.text)" style="width: 20px; height: 20px; background: transparent; border: none; box-shadow: none;">
+                        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor; opacity: 0.6;"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div v-if="isGuidanceEditing" class="guidance-edit-container-inline">
+                <textarea 
+                    v-model="guidanceEditText" 
+                    class="edit-textarea guidance-edit-textarea" 
+                    style="font-style: italic; font-size: 13px; background: rgba(0,0,0,0.03); margin-bottom: 6px;"
+                    rows="1" 
+                    @vue:mounted="({ el }) => focusAndResize(el)"
+                ></textarea>
+                <div class="edit-buttons" style="display: flex; gap: 8px; justify-content: flex-end;">
+                    <div class="edit-btn cancel" title="Cancel" @click.stop="cancelGuidanceEdit" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                    </div>
+                    <div class="edit-btn save" title="Save" @click.stop="saveGuidanceEdit" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div v-else class="guidance-content">{{ currentGuidance.text }}</div>
+        </div>
+
         <!-- Reasoning Block -->
         <div v-if="message.reasoning" class="msg-reasoning collapsed">
             <div class="msg-reasoning-header" @click="$event.target.closest('.msg-reasoning').classList.toggle('collapsed')">
@@ -497,10 +548,6 @@ onUnmounted(() => {
                         <ShadowContent class="error-content" :html="formatMessageText(message.text)" :is-selected="isSelected" />
                     </div>
                     <template v-else>
-                        <div v-if="currentGuidance" class="msg-guidance-block">
-                            <div class="guidance-label">GUIDED {{ currentGuidance.type }}</div>
-                            <div class="guidance-content">{{ currentGuidance.text }}</div>
-                        </div>
                         <ShadowContent :html="combinedMessageData.html" :is-selected="isSelected" />
                     </template>
                     
@@ -537,11 +584,6 @@ onUnmounted(() => {
                 
                 <!-- Typing Indicator -->
                 <div class="msg-body" v-else key="typing">
-                    <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 8px;">
-                        <div class="guidance-label">GUIDED {{ currentGuidance.type }}</div>
-                        <div class="guidance-content">{{ currentGuidance.text }}</div>
-                    </div>
-
                     <div class="typing-container">
                         <svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                         <span class="typing-text">{{ t('model_typing') }}</span>
@@ -1172,7 +1214,7 @@ onUnmounted(() => {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     border: 1px solid var(--border-color, rgba(0,0,0,0.05));
-    border-radius: 0 !important;
+    border-radius: 28px !important;
     padding: 8px 12px;
     display: flex;
     gap: 8px;

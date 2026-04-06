@@ -1525,7 +1525,15 @@ function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
         msg.reasoning = null;
         msg.isTyping = true;
         
-        startGeneration(activeChatChar, null, msgIndex, null, guidanceText || msg.guidanceText, mode === 'guided' ? 'SWIPE' : (msg.guidanceType || 'GENERATION'));
+        let effectiveGuidance = null;
+        let effectiveType = 'GENERATION';
+        
+        if (mode === 'guided') {
+            effectiveGuidance = guidanceText;
+            effectiveType = 'SWIPE';
+        }
+        
+        startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
     } else {
         // Delete and regen (simplified for Vue: remove subsequent, then regen)
         // In Vue we just slice the array
@@ -1890,6 +1898,20 @@ function saveEdit(msg, index) {
 function cancelEdit(msg) {
     msg.isEditing = false;
     delete msg.editText;
+}
+
+function saveGuidance(msg, index, newGuidance) {
+    if (msg.role === 'char') {
+        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0] && msg.swipesMeta[msg.swipeId || 0].guidanceType === 'SWIPE') {
+            msg.swipesMeta[msg.swipeId || 0].guidanceText = newGuidance;
+        }
+        if (msg.guidanceType === 'SWIPE') {
+            msg.guidanceText = newGuidance;
+        }
+    } else if (msg.role === 'user') {
+        msg.guidanceText = newGuidance;
+    }
+    updateSessionMessage(activeChatChar, index, msg);
 }
 
 function toggleImageHidden(msg, index) {
@@ -2585,6 +2607,7 @@ onUnmounted(() => {
                     @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
+                    @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
                     @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
