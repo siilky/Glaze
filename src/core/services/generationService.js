@@ -18,6 +18,16 @@ export function getLastPrompt() {
     return lastPrompt;
 }
 
+/**
+ * Strips embedded base64 media from text so it doesn't inflate token counts limits.
+ */
+function stripEmbeddedMedia(text) {
+    if (!text || text.length < 256) return text;
+    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
+    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
+    return cleaned;
+}
+
 // --- Helpers ---
 
 function getEffectiveApiConfig() {
@@ -270,7 +280,7 @@ export async function generateChatResponse({
     requestBody.messages = requestBody.messages.map(m => {
         const cleanMsg = {
             role: m.role,
-            content: m.content
+            content: stripEmbeddedMedia(m.content)
         };
 
         if (m.image) {

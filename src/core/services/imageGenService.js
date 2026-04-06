@@ -447,16 +447,26 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     for (const tag of tags) {
         const placeholder = `<span class="imggen-loading" title="${escapeAttr(tag.instruction.prompt || 'Generating...')}"></span>`;
         current = current.replace(tag.fullMatch, placeholder);
-        placeholders.push({ placeholder, instruction: tag.instruction });
+        placeholders.push({ placeholder, instruction: tag.instruction, fullMatch: tag.fullMatch });
     }
     onUpdate(current);
 
     // Generate images one by one
-    for (const { placeholder, instruction } of placeholders) {
+    for (const { placeholder, instruction, fullMatch } of placeholders) {
         try {
             const dataUrl = await generateImage(instruction, context);
-            const alt = escapeAttr(instruction.prompt || 'Generated image');
-            const imgHtml = `<img src="${dataUrl}" alt="${alt}" class="imggen-result">`;
+            let imgHtml = '';
+            if (fullMatch.startsWith('<img') && fullMatch.includes('[IMG:GEN]')) {
+                imgHtml = fullMatch.replace(/src=["']\[IMG:GEN\]["']/, `src="${dataUrl}"`);
+                if (!imgHtml.includes('class=')) {
+                    imgHtml = imgHtml.replace('<img', `<img class="imggen-result"`);
+                } else if (!imgHtml.includes('imggen-result')) {
+                    imgHtml = imgHtml.replace('class="', `class="imggen-result `);
+                }
+            } else {
+                const alt = escapeAttr(instruction.prompt || 'Generated image');
+                imgHtml = `<img src="${dataUrl}" alt="${alt}" class="imggen-result">`;
+            }
             current = current.replace(placeholder, imgHtml);
         } catch (err) {
             console.error('[ImageGen]', err);

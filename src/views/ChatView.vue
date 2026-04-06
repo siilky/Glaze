@@ -1412,10 +1412,12 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             // Process image generation tags async (non-blocking)
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
+                msg.swipes[msg.swipeId || 0] = updatedText;
                 updateSessionMessage(char, foundIndex, msg);
             }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
+                    msg.swipes[msg.swipeId || 0] = finalText;
                     updateSessionMessage(char, foundIndex, msg);
                 }
             }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
@@ -1463,6 +1465,18 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                         msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
                         addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
                     }
+                    
+                    processMessageImages(response, (updatedText) => {
+                        msg.text = updatedText;
+                        msg.swipes[msg.swipeId || 0] = updatedText;
+                        db.saveChat(char.id, bgData);
+                    }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
+                        if (finalText !== msg.text) {
+                            msg.text = finalText;
+                            msg.swipes[msg.swipeId || 0] = finalText;
+                            db.saveChat(char.id, bgData);
+                        }
+                    }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
                     
                     await db.saveChat(char.id, bgData);
                     sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
