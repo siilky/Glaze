@@ -24,6 +24,7 @@ import AppToast from '@/components/ui/AppToast.vue';
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
+const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
@@ -794,6 +795,7 @@ watch(currentView, () => {
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
+  <NotificationsSheet />
 
 </template>
 
