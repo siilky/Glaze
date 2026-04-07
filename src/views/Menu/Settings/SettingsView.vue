@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -28,6 +28,13 @@ watch(currentScreen, (newVal) => {
 const hideMsgId = ref(hideMessageId.value);
 const hideGenTime = ref(hideGenerationTime.value);
 const hideTokenCnt = ref(hideTokenCount.value);
+const enterSubmitMode = ref(enterToSubmit.value);
+
+const toggleEnterToSubmit = () => {
+    enterSubmitMode.value = !enterSubmitMode.value;
+    setEnterToSubmit(enterSubmitMode.value);
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+};
 const hideHTips = ref(hideHelpTips.value);
 const dialogGrouped = ref(dialogGrouping.value);
 
@@ -190,6 +197,15 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
 
         <div v-else-if="currentScreen === 'interface'" key="interface">
             <div class="menu-group">
+                <!-- Enter to Send -->
+                <div class="settings-item-checkbox" @click="toggleEnterToSubmit" style="cursor: pointer; padding: 12px 16px;">
+                    <div class="settings-text-col">
+                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_enter_to_send') || 'Enter to Send' }}</label>
+                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_enter_to_send') || 'Press Enter to send message. If disabled, Enter adds a new line. Applies only to physical keyboards.' }}</div>
+                    </div>
+                    <input type="checkbox" class="vk-switch" :checked="enterSubmitMode" style="pointer-events: none;">
+                </div>
+
                 <div class="section-header">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
                 <!-- Dialog Grouping -->
                 <div class="settings-item-checkbox" @click="toggleDialogGrouped">

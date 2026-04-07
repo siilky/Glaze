@@ -53,6 +53,12 @@ export function setHideTokenCount(value) {
     localStorage.setItem('gz_hide_token_count', value);
 }
 
+export const enterToSubmit = ref(localStorage.getItem('gz_enter_to_submit') !== 'false');
+export function setEnterToSubmit(value) {
+    enterToSubmit.value = value;
+    localStorage.setItem('gz_enter_to_submit', value);
+}
+
 export const hideHelpTips = ref(localStorage.getItem('gz_hide_help_tips') === 'true');
 export function setHideHelpTips(value) {
     hideHelpTips.value = value;
