@@ -47,7 +47,8 @@ import StatsSheet from '@/components/sheets/StatsSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
-import { processMessageImages } from '@/core/services/imageGenService.js';
+import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
+import { showToast } from '@/core/states/toastState.js';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -723,6 +724,7 @@ async function openChat(char, onBack, force = false) {
             }, 50);
             messagesContainer.value.addEventListener('scroll', onScroll);
             onScroll({ target: messagesContainer.value });
+            applyImageAutoHide();
         }
         // updateInputPreview(); // Handled by ChatInput component
 
@@ -1261,7 +1263,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             role: m.role === 'user' ? 'user' : 'assistant', 
             content: m.text || "", 
             text: m.text || "", 
-            image: m.image || null,
+            image: (m.image && !m.imageHidden) ? m.image : null,
             chatId: m.originalIndex 
         }));
 
@@ -1410,10 +1412,12 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             // Process image generation tags async (non-blocking)
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
+                msg.swipes[msg.swipeId || 0] = updatedText;
                 updateSessionMessage(char, foundIndex, msg);
             }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
+                    msg.swipes[msg.swipeId || 0] = finalText;
                     updateSessionMessage(char, foundIndex, msg);
                 }
             }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
@@ -1462,6 +1466,18 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                         addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
                     }
                     
+                    processMessageImages(response, (updatedText) => {
+                        msg.text = updatedText;
+                        msg.swipes[msg.swipeId || 0] = updatedText;
+                        db.saveChat(char.id, bgData);
+                    }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
+                        if (finalText !== msg.text) {
+                            msg.text = finalText;
+                            msg.swipes[msg.swipeId || 0] = finalText;
+                            db.saveChat(char.id, bgData);
+                        }
+                    }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
+                    
                     await db.saveChat(char.id, bgData);
                     sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
                     
@@ -1481,6 +1497,38 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             onError
         }
     });
+    }
+}
+
+async function handleImageRegenerate(msgIndex, { instruction, id }) {
+    const char = activeChatChar;
+    if (!char || !currentMessages.value[msgIndex]) return;
+    const msg = currentMessages.value[msgIndex];
+
+    const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const loadingHtml = makeLoadingHtml(instruction, id);
+    const toLoading = (text) => text
+        .replace(new RegExp(`<span[^>]+class="imggen-error"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
+        .replace(new RegExp(`<span[^>]+class="imggen-result-wrapper"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
+
+    msg.text = toLoading(msg.text);
+    msg.swipes[msg.swipeId || 0] = msg.text;
+    updateSessionMessage(char, msgIndex, msg);
+
+    const loadingRe = new RegExp(`<span[^>]+class="imggen-loading"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/span>`, 'g');
+    const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
+
+    try {
+        const dataUrl = await generateImage(instruction, context);
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeResultHtml(instruction, id, dataUrl));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
+    } catch (err) {
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
     }
 }
 
@@ -1523,7 +1571,15 @@ function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
         msg.reasoning = null;
         msg.isTyping = true;
         
-        startGeneration(activeChatChar, null, msgIndex, null, guidanceText || msg.guidanceText, mode === 'guided' ? 'SWIPE' : (msg.guidanceType || 'GENERATION'));
+        let effectiveGuidance = null;
+        let effectiveType = 'GENERATION';
+        
+        if (mode === 'guided') {
+            effectiveGuidance = guidanceText;
+            effectiveType = 'SWIPE';
+        }
+        
+        startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
     } else {
         // Delete and regen (simplified for Vue: remove subsequent, then regen)
         // In Vue we just slice the array
@@ -1890,6 +1946,26 @@ function cancelEdit(msg) {
     delete msg.editText;
 }
 
+function saveGuidance(msg, index, newGuidance) {
+    if (msg.role === 'char') {
+        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0] && msg.swipesMeta[msg.swipeId || 0].guidanceType === 'SWIPE') {
+            msg.swipesMeta[msg.swipeId || 0].guidanceText = newGuidance;
+        }
+        if (msg.guidanceType === 'SWIPE') {
+            msg.guidanceText = newGuidance;
+        }
+    } else if (msg.role === 'user') {
+        msg.guidanceText = newGuidance;
+    }
+    updateSessionMessage(activeChatChar, index, msg);
+}
+
+function toggleImageHidden(msg, index) {
+    msg.imageHidden = !msg.imageHidden;
+    updateSessionMessage(activeChatChar, index, msg);
+    showToast(msg.imageHidden ? 'Изображение скрыто из контекста' : 'Изображение добавлено в контекст');
+}
+
 // --- Magic Menu ---
 
 async function startImpersonation(guidanceText = null) {
@@ -1940,8 +2016,10 @@ async function startImpersonation(guidanceText = null) {
     // Prepare history
     const history = currentMessages.value
         .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping)
+        .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
+
+    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
 
     generateChatResponse({
         text: promptText,
@@ -2058,7 +2136,8 @@ async function deleteSession(sessionId, targetChar) {
         await loadChats(); // Reload local state
         
         if (activeChatChar && activeChatChar.id === char.id) {
-            const currentData = await getChatData(char.id);
+            // Fetch raw DB state to bypass getChat's auto-creation
+            const currentData = await db.get(`gz_chat_${char.id}`);
             // Check if there are any sessions left
             if (!currentData || !currentData.sessions || Object.keys(currentData.sessions).length === 0) {
                 // No sessions left, close chat manually to avoid creating a new empty one
@@ -2187,10 +2266,15 @@ function openDeleteSessionConfirm(char, sessionId, returnToSessions = false) {
                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
-                onClick: () => {
-                    deleteSession(sessionId, char);
+                onClick: async () => {
+                    await deleteSession(sessionId, char);
                     closeBottomSheet();
-                    if (returnToSessions) setTimeout(() => openSessionsSheet(char), 300);
+                    if (returnToSessions) {
+                        const currentData = await db.get(`gz_chat_${char.id}`);
+                        if (currentData && currentData.sessions && Object.keys(currentData.sessions).length > 0) {
+                            setTimeout(() => openSessionsSheet(char), 300);
+                        }
+                    }
                 }
             },
             {
@@ -2256,6 +2340,38 @@ function openRegexSheet() {
     regexSheet.value?.open();
 }
 
+const applyImageAutoHide = () => {
+    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    
+    if (!autoHide || threshold <= 0 || !activeChatChar) return;
+
+    let changed = false;
+    let assistantCount = 0;
+    
+    // Iterate backwards to count assistant responses after user images
+    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
+        const msg = currentMessages.value[i];
+        if (msg.role === 'char' || msg.role === 'assistant') {
+            assistantCount++;
+        } else if (msg.role === 'user' && msg.image) {
+            if (assistantCount >= threshold && !msg.imageHidden) {
+                msg.imageHidden = true;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        getChatData(activeChatChar.id).then(data => {
+            if (data) {
+                data.sessions[data.currentId] = currentMessages.value;
+                db.saveChat(activeChatChar.id, data);
+            }
+        });
+    }
+};
+
 const restoreHeader = () => {
     if (activeChatChar) setupHeader(activeChatChar);
 };
@@ -2274,6 +2390,7 @@ const onGenerationEnded = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.charId) {
         isGenerating.value = false;
         isImpersonating.value = false;
+        applyImageAutoHide();
         updateContextCutoff();
     }
 };
@@ -2544,9 +2661,12 @@ onUnmounted(() => {
                     @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
+                    @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
                     @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
+                    @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
+                    @regenerate-image="(payload) => handleImageRegenerate(vItem.item.originalIndex, payload)"
                 />
             </template>
             <!-- paddingBottom - spacer for virtual list scroll offset -->

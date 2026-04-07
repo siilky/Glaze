@@ -4,6 +4,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { activePersona, allPersonas, setActivePersona } from '@/core/states/personaState.js';
 import { logger } from '../../utils/logger.js';
+import { notificationsState, clearUnread } from '@/core/states/notificationsState.js';
 
 const props = defineProps({
   currentView: String,
@@ -509,6 +510,11 @@ function onAfterTransition() {
     headerEl.value.style.height = 'auto';
 }
 
+function openNotifications() {
+    clearUnread();
+    window.dispatchEvent(new CustomEvent('open-notifications-sheet'));
+}
+
 // Expose updateHeader so the parent can force a refresh (e.g., on language change)
 defineExpose({ updateHeader });
 </script>
@@ -608,11 +614,15 @@ defineExpose({ updateHeader });
           </div>
       </Transition>
 
-      <!-- Right Actions -->
-      <div v-if="state.showActions && !state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop="handleActionsClick">
-           <div v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '40px', height: '40px' }">
-               <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
-            </div>
+      <!-- Right Actions + Notification Bell -->
+      <div v-if="!state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop>
+          <div v-if="state.showActions" v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
+              <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
+          </div>
+          <!-- <div class="header-action-btn notif-btn" @click.stop="openNotifications">
+              <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+              <span v-if="notificationsState.unreadCount > 0" class="notif-badge"></span>
+          </div> -->
       </div>
 
       <!-- Lorebook Banner (Glassmorphism) -->
@@ -727,17 +737,43 @@ body.dark-theme .app-header {
 .header-btn-right {
     position: absolute;
     right: 10px;
-    top: 13px;
-    width: 30px;
-    height: 30px;
+    top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    color: var(--vk-blue);
+    fill: currentColor;
+    transition: color var(--transition-speed) ease;
+    z-index: 10;
+}
+
+.header-action-btn {
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    color: var(--vk-blue);
-    fill: currentColor;
-    transition: color var(--transition-speed) ease;
-    z-index: 2;
+}
+
+.notif-btn {
+    position: relative;
+}
+
+.notif-badge {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff4444;
+    border: 1.5px solid var(--bg-color, #fff);
+    pointer-events: none;
+}
+
+body.dark-theme .notif-badge {
+    border-color: rgba(30, 30, 30, 0.8);
 }
 
 .header-default-group {

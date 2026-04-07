@@ -116,33 +116,125 @@ const getStyles = () => `
     -webkit-touch-callout: default;
   }
   .imggen-loading {
-    display: inline-block;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    border: 3px solid rgba(128, 128, 128, 0.2);
-    border-top-color: #007AFF;
-    animation: imggen-spin 0.8s linear infinite;
-    vertical-align: middle;
-    margin: 8px 0;
-  }
-  @keyframes imggen-spin { to { transform: rotate(360deg); } }
-  .imggen-error {
-    display: inline-block;
-    padding: 6px 10px;
-    background: rgba(255, 59, 48, 0.12);
-    border-radius: 8px;
-    color: #FF3B30;
-    font-size: 12px;
-    margin: 4px 0;
+    display: block;
+    width: 240px;
     max-width: 100%;
-    word-break: break-word;
+    border-radius: 12px;
+    margin: 8px 0;
+    background: linear-gradient(90deg,
+      rgba(128,128,128,0.07) 25%,
+      rgba(128,128,128,0.16) 50%,
+      rgba(128,128,128,0.07) 75%);
+    background-size: 200% 100%;
+    animation: imggen-shimmer 1.4s infinite linear;
+    position: relative;
+    overflow: hidden;
+    border: none;
+  }
+  @keyframes imggen-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+  }
+  .imggen-loading-prompt {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    font-size: 11px;
+    color: rgba(128,128,128,0.7);
+    line-height: 1.4;
+    max-height: 2.8em;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+    user-select: none;
+  }
+  .imggen-loading.expanded .imggen-loading-prompt {
+    top: 10px;
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+  }
+  .imggen-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 240px;
+    max-width: 100%;
+    border-radius: 12px;
+    margin: 8px 0;
+    padding: 14px 12px;
+    box-sizing: border-box;
+    background: rgba(255,59,48,0.08);
+    border: 1px solid rgba(255,59,48,0.22);
+  }
+  .imggen-error-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
+  .imggen-error-msg {
+    font-size: 10px;
+    color: rgba(255,59,48,0.9);
+    text-align: center;
+    word-break: break-all;
+    line-height: 1.4;
+  }
+  .imggen-error-retry {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 12px;
+    padding: 2px 8px;
+    height: 22px;
+    font-size: 11px;
+    color: rgba(255,59,48,0.9);
+    background: rgba(255,59,48,0.1);
+    border: 1px solid rgba(255,59,48,0.3);
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .imggen-error-retry:active { background: rgba(255,59,48,0.2); }
+  .imggen-error-retry svg { width: 13px; height: 13px; fill: currentColor; pointer-events: none; }
+  .imggen-result-wrapper {
+    display: inline-block;
+    position: relative;
+    margin: 6px 0;
   }
   .imggen-result {
     max-width: 100%;
     border-radius: 10px;
-    margin: 6px 0;
     display: block;
+    margin: 0;
+  }
+  .imggen-options-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.50);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.2s, background 0.15s;
+  }
+  .imggen-result-wrapper:hover .imggen-options-btn { opacity: 1; }
+  @media (hover: none) { .imggen-options-btn { opacity: 0.7; } }
+  .imggen-options-btn:active { background: rgba(0,0,0,0.75); }
+  .imggen-options-btn svg { width: 16px; height: 16px; fill: #fff; pointer-events: none; }
+  :global(body.dark-theme) .imggen-loading {
+    background: linear-gradient(90deg,
+      rgba(255,255,255,0.04) 25%,
+      rgba(255,255,255,0.10) 50%,
+      rgba(255,255,255,0.04) 75%);
+    background-size: 200% 100%;
+    animation: imggen-shimmer 1.4s infinite linear;
+  }
+  :global(body.dark-theme) .imggen-error {
+    background: rgba(255,59,48,0.13);
+    border-color: rgba(255,59,48,0.32);
   }
   .chat-quote {
     color: var(--current-quote-color, var(--char-quote-color, var(--vk-blue))) !important;
