@@ -1,3 +1,5 @@
+import { t } from '@/utils/i18n.js';
+
 /**
  * Image Generation Service for Glaze
  *
@@ -30,12 +32,16 @@ const SETTINGS_KEY = {
 
 const ADDITIONAL_REFS_KEY = 'gz_imggen_additional_refs';
 
+function sanitizeHeaderValue(val) {
+    return String(val || '').replace(/[^\x20-\x7E]/g, '').trim();
+}
+
 export function getImageGenSettings() {
     return {
         enabled: localStorage.getItem(SETTINGS_KEY.enabled) === 'true',
         apiType: localStorage.getItem(SETTINGS_KEY.apiType) || 'openai',
-        endpoint: localStorage.getItem(SETTINGS_KEY.endpoint) || '',
-        apiKey: localStorage.getItem(SETTINGS_KEY.apiKey) || '',
+        endpoint: (localStorage.getItem(SETTINGS_KEY.endpoint) || '').trim(),
+        apiKey: sanitizeHeaderValue(localStorage.getItem(SETTINGS_KEY.apiKey)),
         model: localStorage.getItem(SETTINGS_KEY.model) || '',
         size: localStorage.getItem(SETTINGS_KEY.size) || '1024x1024',
         quality: localStorage.getItem(SETTINGS_KEY.quality) || 'standard',
@@ -412,8 +418,68 @@ export async function fetchImageModels() {
         });
 }
 
-function escapeAttr(str) {
-    return String(str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// ---- Image HTML Builders ----
+
+function makeIIGId() {
+    return `iig_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function encodeIIGInstruction(instruction) {
+    return JSON.stringify(instruction).replace(/&/g, '&amp;').replace(/'/g, '&#39;');
+}
+
+/**
+ * Derive CSS aspect-ratio string from current image gen settings.
+ * e.g. "16:9" → "16 / 9", OpenAI "1024x1792" → "1024 / 1792"
+ */
+function getPlaceholderAspectRatio() {
+    const s = getImageGenSettings();
+    if (s.apiType === 'openai') {
+        const [w, h] = (s.size || '1024x1024').split('x').map(Number);
+        return `${w} / ${h}`;
+    }
+    const arStr = s.apiType === 'naistera' ? (s.naisteraAspectRatio || '1:1') : (s.aspectRatio || '1:1');
+    const [w, h] = arStr.split(':').map(Number);
+    return `${w} / ${h}`;
+}
+
+export function makeLoadingHtml(instruction, id) {
+    const enc = encodeIIGInstruction(instruction);
+    const prompt = (instruction.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const ar = getPlaceholderAspectRatio();
+    return `<span class="imggen-loading" style="aspect-ratio:${ar}" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-loading-prompt">${prompt}</span></span>`;
+}
+
+function extractErrorMessage(errorMessage) {
+    const str = String(errorMessage || 'Generation failed');
+    const jsonMatch = str.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        try {
+            const obj = JSON.parse(jsonMatch[0]);
+            const detail = obj.detail || obj.message || obj.error_description;
+            if (detail && typeof detail === 'string') {
+                const prefix = str.slice(0, jsonMatch.index).replace(/:?\s*$/, '').trim();
+                return prefix ? `${prefix}: ${detail}` : detail;
+            }
+        } catch { /* fall through */ }
+    }
+    return str.slice(0, 120);
+}
+
+export function makeErrorHtml(instruction, id, errorMessage) {
+    const enc = encodeIIGInstruction(instruction);
+    const msg = extractErrorMessage(errorMessage).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const label = t('action_regenerate') || 'Regenerate';
+    return `<span class="imggen-error" data-iig-instruction='${enc}' data-iig-id="${id}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${msg}</span><button class="imggen-error-retry" type="button">${RETRY_SVG}${label}</button></span>`;
+}
+
+const RETRY_SVG = `<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
+const OPTIONS_SVG = `<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>`;
+
+export function makeResultHtml(instruction, id, dataUrl) {
+    const enc = encodeIIGInstruction(instruction);
+    const alt = (instruction.prompt || 'Generated image').slice(0, 120).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return `<span class="imggen-result-wrapper"><img class="imggen-result" src="${dataUrl}" alt="${alt}" data-iig-instruction='${enc}' data-iig-id="${id}"><button class="imggen-options-btn" type="button" title="Options">${OPTIONS_SVG}</button></span>`;
 }
 
 /**
@@ -445,33 +511,21 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     let current = text;
     const placeholders = [];
     for (const tag of tags) {
-        const placeholder = `<span class="imggen-loading" title="${escapeAttr(tag.instruction.prompt || 'Generating...')}"></span>`;
+        const id = makeIIGId();
+        const placeholder = makeLoadingHtml(tag.instruction, id);
         current = current.replace(tag.fullMatch, placeholder);
-        placeholders.push({ placeholder, instruction: tag.instruction, fullMatch: tag.fullMatch });
+        placeholders.push({ placeholder, id, instruction: tag.instruction, fullMatch: tag.fullMatch });
     }
     onUpdate(current);
 
     // Generate images one by one
-    for (const { placeholder, instruction, fullMatch } of placeholders) {
+    for (const { placeholder, id, instruction } of placeholders) {
         try {
             const dataUrl = await generateImage(instruction, context);
-            let imgHtml = '';
-            if (fullMatch.startsWith('<img') && fullMatch.includes('[IMG:GEN]')) {
-                imgHtml = fullMatch.replace(/src=["']\[IMG:GEN\]["']/, `src="${dataUrl}"`);
-                if (!imgHtml.includes('class=')) {
-                    imgHtml = imgHtml.replace('<img', `<img class="imggen-result"`);
-                } else if (!imgHtml.includes('imggen-result')) {
-                    imgHtml = imgHtml.replace('class="', `class="imggen-result `);
-                }
-            } else {
-                const alt = escapeAttr(instruction.prompt || 'Generated image');
-                imgHtml = `<img src="${dataUrl}" alt="${alt}" class="imggen-result">`;
-            }
-            current = current.replace(placeholder, imgHtml);
+            current = current.replace(placeholder, makeResultHtml(instruction, id, dataUrl));
         } catch (err) {
             console.error('[ImageGen]', err);
-            const title = escapeAttr(err.message || 'Generation failed');
-            current = current.replace(placeholder, `<span class="imggen-error" title="${title}">⚠ ${escapeAttr(String(err.message || '').slice(0, 60))}</span>`);
+            current = current.replace(placeholder, makeErrorHtml(instruction, id, err.message));
         }
         onUpdate(current);
     }

@@ -47,7 +47,7 @@ import StatsSheet from '@/components/sheets/StatsSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
-import { processMessageImages } from '@/core/services/imageGenService.js';
+import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
@@ -1500,6 +1500,38 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     }
 }
 
+async function handleImageRegenerate(msgIndex, { instruction, id }) {
+    const char = activeChatChar;
+    if (!char || !currentMessages.value[msgIndex]) return;
+    const msg = currentMessages.value[msgIndex];
+
+    const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const loadingHtml = makeLoadingHtml(instruction, id);
+    const toLoading = (text) => text
+        .replace(new RegExp(`<span[^>]+class="imggen-error"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
+        .replace(new RegExp(`<span[^>]+class="imggen-result-wrapper"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
+
+    msg.text = toLoading(msg.text);
+    msg.swipes[msg.swipeId || 0] = msg.text;
+    updateSessionMessage(char, msgIndex, msg);
+
+    const loadingRe = new RegExp(`<span[^>]+class="imggen-loading"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/span>`, 'g');
+    const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
+
+    try {
+        const dataUrl = await generateImage(instruction, context);
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeResultHtml(instruction, id, dataUrl));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
+    } catch (err) {
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
+    }
+}
+
 function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
     if (msgIndex === -1) return;
     const msg = currentMessages.value[msgIndex];
@@ -2626,6 +2658,7 @@ onUnmounted(() => {
                     @open-avatar="openAvatar(vItem.item.data)"
                     @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
                     @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
+                    @regenerate-image="(payload) => handleImageRegenerate(vItem.item.originalIndex, payload)"
                 />
             </template>
             <!-- paddingBottom - spacer for virtual list scroll offset -->

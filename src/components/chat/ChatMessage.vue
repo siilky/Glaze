@@ -27,9 +27,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-    'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit', 
+    'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
     'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
-    'save-guidance'
+    'save-guidance', 'regenerate-image'
 ]);
 
 const triggeredItemsSheet = ref(null);
@@ -407,6 +407,73 @@ const openImage = (src) => {
         detail: { src, name: 'Attachment' }
     }));
 };
+
+const parseIIGInstruction = (el) => {
+    if (!el?.dataset?.iigInstruction) return null;
+    try {
+        return JSON.parse(el.dataset.iigInstruction
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+    } catch { return null; }
+};
+
+const handleContentClick = (e) => {
+    const path = e.composedPath();
+
+    // Loading block — tap to expand/collapse prompt text
+    const loadingBlock = path.find(el => el?.classList?.contains('imggen-loading'));
+    if (loadingBlock) {
+        e.stopPropagation();
+        loadingBlock.classList.toggle('expanded');
+        return;
+    }
+
+    // Options button on generated image → bottom sheet with 3 actions
+    const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
+    if (optionsBtn) {
+        e.stopPropagation();
+        const wrapper = path.find(el => el?.classList?.contains('imggen-result-wrapper'));
+        const img = wrapper?.querySelector?.('img.imggen-result');
+        if (!img) return;
+        const instr = parseIIGInstruction(img);
+        const id = img.dataset?.iigId;
+        const src = img.src;
+        showBottomSheet({
+            items: [
+                {
+                    label: t('imggen_expand_image') || 'Expand image',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
+                    onClick: () => { closeBottomSheet(); openImage(src); }
+                },
+                {
+                    label: t('action_regenerate') || 'Regenerate',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
+                    onClick: () => { closeBottomSheet(); if (instr && id) emit('regenerate-image', { instruction: instr, id }); }
+                },
+                {
+                    label: t('imggen_view_prompt') || 'View prompt',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
+                    onClick: () => { closeBottomSheet(); showBottomSheet({ title: t('imggen_view_prompt') || 'Prompt', content: `<div style="padding:14px 16px;font-size:13px;line-height:1.6;color:var(--text-secondary,rgba(255,255,255,0.7));white-space:pre-wrap;word-break:break-word;">${(instr?.prompt || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>` }); }
+                },
+            ]
+        });
+        return;
+    }
+
+    // Error retry button
+    const retryBtn = path.find(el => el?.classList?.contains('imggen-error-retry'));
+    if (retryBtn) {
+        e.stopPropagation();
+        const errorBlock = path.find(el => el?.classList?.contains('imggen-error'));
+        if (errorBlock) {
+            const instr = parseIIGInstruction(errorBlock);
+            const id = errorBlock.dataset?.iigId;
+            if (instr && id) emit('regenerate-image', { instruction: instr, id });
+        }
+        return;
+    }
+
+    handleBubbleClick(e);
+};
 const layoutMode = computed(() => themeState.chatLayout);
 const showFooter = computed(() => {
     // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
@@ -543,7 +610,7 @@ onUnmounted(() => {
                     class="msg-body" 
                     v-else-if="message.text || (!message.isTyping && !message.text)" 
                     :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)"
-                    @click="handleBubbleClick"
+                    @click="handleContentClick"
                 >
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">

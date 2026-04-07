@@ -230,6 +230,15 @@ defineExpose({ open });
                         </div>
                     </div>
 
+                    <!-- Naistera hint -->
+                    <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
+                        {{ t('imggen_naistera_hint') || 'Learn about Naistera' }}
+                        <span class="naistera-hint-accent">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                            {{ t('imggen_naistera_hint_here') || 'here' }}
+                        </span>
+                    </a>
+
                     <!-- Endpoint -->
                     <div class="settings-item">
                         <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
@@ -250,11 +259,6 @@ defineExpose({ open });
                             :placeholder="showNaisteraOptions ? 'Telegram bot token' : 'sk-...'"
                             autocomplete="off"
                         >
-                    </div>
-
-                    <!-- Naistera hint -->
-                    <div v-if="showNaisteraOptions" class="settings-item naistera-hint">
-                        Получите токен в Telegram боте Naistera и выберите модель.
                     </div>
                 </div>
 
@@ -458,10 +462,30 @@ defineExpose({ open });
     padding-top: 8px;
 }
 
-.naistera-hint {
+.naistera-hint-box {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 16px 4px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(var(--vk-blue-rgb, 33, 150, 243), 0.08);
+    border: 1px solid rgba(var(--vk-blue-rgb, 33, 150, 243), 0.2);
     font-size: 13px;
-    color: var(--text-gray);
-    opacity: 0.8;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+.naistera-hint-accent {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--vk-blue, #2196F3);
+}
+.naistera-hint-accent svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+    flex-shrink: 0;
 }
 
 /* Selector row — replaces <select> */
