@@ -653,7 +653,7 @@
     "imggen_send_user_avatar_desc": "Use active persona's avatar as visual reference",
     "imggen_additional_refs": "Additional references",
     "imggen_add_ref": "Add reference",
-    "confirm_discard_changes": "Discard changes?"
+    "confirm_discard_changes": "Discard changes?",
     "imggen_image_context": "Image Context",
     "imggen_image_context_enabled": "Send previous images as context",
     "imggen_image_context_desc": "Include recently generated images as visual reference for new generations",

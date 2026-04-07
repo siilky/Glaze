@@ -4,7 +4,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { isKeyboardOpen } from '@/core/services/keyboardHandler.js';
 import { ref, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     modelValue: {
         type: String,
         default: ''
