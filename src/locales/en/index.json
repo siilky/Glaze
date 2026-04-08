@@ -253,6 +253,8 @@
     "label_holocards": "Holo Cards (3D)",
     "menu_image_viewer": "Image Viewer",
     "imggen_expand_image": "Expand image",
+    "imggen_expand_image_hint": "Open the image in fullscreen and view the prompt",
+    "imggen_regenerate_hint": "Re-generate the image",
     "imggen_view_prompt": "View prompt",
     "viewer_default": "Default (2D)",
     "viewer_holo": "Holo Cards (3D)",

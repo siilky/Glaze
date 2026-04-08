@@ -13,8 +13,8 @@ const view = ref('categories'); // 'categories' | 'terms' | 'article'
 const selectedCategory = ref(null);
 const selectedTerm = ref(null);
 const searchQuery = ref('');
-const fromSearch = ref(false);
 const navDirection = ref('forward'); // 'forward' | 'back'
+const navStack = ref([]); // [{ view, selectedCategory, selectedTerm }]
 
 const CATEGORY_ICONS = {
     basics:      'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
@@ -23,6 +23,9 @@ const CATEGORY_ICONS = {
     presets:     'M4 6h16M4 10h16M4 14h10',
     lorebook:    'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z',
     regex:       'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4',
+    chat:        'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 0 1-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+    profile:     'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+    interface:   'M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z',
     advanced:    'M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 4v4l3 3',
 };
 
@@ -33,6 +36,9 @@ const CATEGORY_COLORS = {
     presets:    { light: 'rgba(159,122,234,0.12)', dark: 'rgba(159,122,234,0.18)', icon: '#9f7aea' },
     lorebook:   { light: 'rgba(237,100,100,0.12)', dark: 'rgba(237,100,100,0.18)', icon: '#ed6464' },
     regex:      { light: 'rgba(56,189,178,0.12)',  dark: 'rgba(56,189,178,0.18)',  icon: '#38bdb2' },
+    chat:       { light: 'rgba(236,201,75,0.12)',  dark: 'rgba(236,201,75,0.18)',  icon: '#ecc94b' },
+    profile:    { light: 'rgba(160,174,192,0.12)', dark: 'rgba(160,174,192,0.18)', icon: '#a0aec0' },
+    interface:  { light: 'rgba(237,100,166,0.12)', dark: 'rgba(237,100,166,0.18)', icon: '#ed64a6' },
     advanced:   { light: 'rgba(160,174,192,0.12)', dark: 'rgba(160,174,192,0.18)', icon: '#a0aec0' },
 };
 
@@ -73,23 +79,43 @@ function getCategoryColor(id) {
 
 function selectCategory(cat) {
     navDirection.value = 'forward';
+    navStack.value = [];
     selectedCategory.value = cat;
     view.value = 'terms';
 }
 
 function selectTerm(term, fromSearchResults = false) {
     navDirection.value = 'forward';
-    fromSearch.value = fromSearchResults;
+    navStack.value.push({ view: view.value, selectedCategory: selectedCategory.value, selectedTerm: selectedTerm.value });
+    const cat = categories.value.find(c => c.terms.some(t => t.id === term.id));
+    if (cat) selectedCategory.value = cat;
+    selectedTerm.value = term;
+    view.value = 'article';
+}
+
+function navigateToChipTerm(termId) {
+    const term = categories.value.flatMap(c => c.terms).find(t => t.id === termId);
+    if (!term) return;
+    navDirection.value = 'forward';
+    navStack.value.push({ view: view.value, selectedCategory: selectedCategory.value, selectedTerm: selectedTerm.value });
+    const cat = categories.value.find(c => c.terms.some(t => t.id === termId));
+    selectedCategory.value = cat;
     selectedTerm.value = term;
     view.value = 'article';
 }
 
 function goBack() {
     navDirection.value = 'back';
+    if (navStack.value.length > 0) {
+        const prev = navStack.value.pop();
+        view.value = prev.view;
+        selectedCategory.value = prev.selectedCategory;
+        selectedTerm.value = prev.selectedTerm;
+        return;
+    }
     if (view.value === 'article') {
         selectedTerm.value = null;
-        view.value = fromSearch.value ? 'categories' : 'terms';
-        fromSearch.value = false;
+        view.value = 'terms';
     } else if (view.value === 'terms') {
         view.value = 'categories';
         selectedCategory.value = null;
@@ -97,6 +123,7 @@ function goBack() {
 }
 
 async function open(termId) {
+    navStack.value = [];
     if (!props.viewMode) {
         sheet.value?.open();
     }
@@ -106,7 +133,6 @@ async function open(termId) {
             const cat = categories.value.find(c => c.terms.some(t => t.id === termId));
             selectedCategory.value = cat;
             selectedTerm.value = term;
-            fromSearch.value = false;
             view.value = 'article';
         }
     } else {
@@ -114,7 +140,6 @@ async function open(termId) {
         selectedCategory.value = null;
         selectedTerm.value = null;
         searchQuery.value = '';
-        fromSearch.value = false;
     }
 }
 
@@ -132,8 +157,8 @@ function handleGlBack() {
     }
 }
 
-// Sync header title when navigating inside viewMode
-watch(view, () => {
+// Sync header title when navigating inside viewMode (watches sheetTitle to catch chip-to-chip article nav)
+watch(sheetTitle, () => {
     if (!props.viewMode) return;
     window.dispatchEvent(new CustomEvent('gl-header-update', { detail: { title: sheetTitle.value } }));
 });
@@ -150,6 +175,25 @@ onMounted(() => {
 onBeforeUnmount(() => {
     window.removeEventListener('open-glossary', handleGlossaryEvent);
     window.removeEventListener('gl-back', handleGlBack);
+});
+
+const parsedDesc = computed(() => {
+    if (!selectedTerm.value?.desc) return [];
+    const parts = [];
+    // Syntax: [[termId]] or [[termId|display text]]
+    const regex = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g;
+    const text = selectedTerm.value.desc;
+    let lastIndex = 0, match;
+    while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) parts.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+        const termId = match[1];
+        const displayText = match[2]; // undefined if no pipe
+        const ref = categories.value.flatMap(c => c.terms).find(t => t.id === termId);
+        parts.push({ type: 'chip', termId, label: displayText ?? ref?.name ?? termId });
+        lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) parts.push({ type: 'text', value: text.slice(lastIndex) });
+    return parts;
 });
 
 defineExpose({ open });
@@ -213,13 +257,18 @@ defineExpose({ open });
                     </div>
                 </div>
 
-                <div v-else-if="view === 'article'" key="article" class="gl-article">
+                <div v-else-if="view === 'article'" :key="'article-' + selectedTerm?.id" class="gl-article">
                     <div class="gl-article-header">
                         <h1 class="gl-article-title">{{ selectedTerm.name }}</h1>
                         <span v-if="selectedTerm.alt" class="gl-article-badge">{{ selectedTerm.alt }}</span>
                     </div>
                     <div class="gl-article-divider"></div>
-                    <p class="gl-article-desc">{{ selectedTerm.desc }}</p>
+                    <p class="gl-article-desc">
+                        <template v-for="(part, i) in parsedDesc" :key="i">
+                            <span v-if="part.type === 'text'">{{ part.value }}</span>
+                            <button v-else class="gl-chip" @click="navigateToChipTerm(part.termId)">{{ part.label }}</button>
+                        </template>
+                    </p>
                 </div>
 
             </Transition>
@@ -588,5 +637,33 @@ body.dark-theme .gl-article-divider {
 .gl-fade-enter-from,
 .gl-fade-leave-to {
     opacity: 0;
+}
+
+/* ── Link chips inside article descriptions ──────────── */
+.gl-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin: 0 2px;
+    border-radius: 6px;
+    background: rgba(var(--vk-blue-rgb), 0.12);
+    color: var(--vk-blue);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+    cursor: pointer;
+    vertical-align: baseline;
+    line-height: 1.5;
+    transition: background 0.15s, opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.gl-chip:active {
+    background: rgba(var(--vk-blue-rgb), 0.22);
+    opacity: 0.8;
+}
+body.dark-theme .gl-chip {
+    background: rgba(var(--vk-blue-rgb), 0.18);
+    border-color: rgba(var(--vk-blue-rgb), 0.28);
 }
 </style>
