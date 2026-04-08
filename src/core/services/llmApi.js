@@ -1,4 +1,4 @@
-import { BackgroundTask } from '@capawesome/capacitor-background-task';
+import { BackgroundMode } from '@anuradev/capacitor-background-mode';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { cleanText } from '@/utils/textFormatter.js';
@@ -44,29 +44,17 @@ export async function executeRequest({
     const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Setup Background Task to keep app alive if backgrounded
-    let backgroundTaskId = null;
-    let completeBackgroundTask = null;
-    let isTaskFinished = false;
+    // Keep app alive when backgrounded during generation
     const isAndroid = Capacitor.getPlatform() === 'android';
+    const isIos = Capacitor.getPlatform() === 'ios';
 
     if (isAndroid) {
         await startGenerationNotification('Glaze', translations[currentLang.value]['model_typing'] || 'Generating...');
-    } else {
-        // Fallback for iOS and other platforms
+    } else if (isIos) {
         try {
-            backgroundTaskId = await BackgroundTask.beforeExit(async () => {
-                if (isTaskFinished) {
-                    if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-                    return;
-                }
-                await new Promise(resolve => {
-                    completeBackgroundTask = resolve;
-                });
-                if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-            });
+            await BackgroundMode.enable();
         } catch (e) {
-            console.warn("Background Task setup failed:", e);
+            console.warn("BackgroundMode enable failed:", e);
         }
     }
 
@@ -347,12 +335,10 @@ export async function executeRequest({
 
         if (isAndroid) {
             await stopGenerationNotification();
-        } else {
-            // Signal Background Task to finish (iOS/Web)
-            isTaskFinished = true;
-            if (completeBackgroundTask) {
-                completeBackgroundTask();
-            }
+        } else if (isIos) {
+            try {
+                await BackgroundMode.disable();
+            } catch (e) {}
         }
     }
 }
