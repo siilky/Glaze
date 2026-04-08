@@ -217,11 +217,12 @@ onBeforeUnmount(() => {
 
                 <!-- List Items -->
                 <div v-if="items && items.length" class="sheet-list">
-                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered }" @click="item.onClick">
+                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
                         <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
-                        <span class="sheet-item-content" :class="{ 'text-destructive': item.isDestructive }">
-                            {{ item.label }}
-                        </span>
+                        <div class="sheet-item-content">
+                            <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
+                            <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                        </div>
                         
                         <!-- Item Actions (Buttons on the right) -->
                         <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
@@ -452,6 +453,21 @@ onBeforeUnmount(() => {
     color: var(--text-black);
     word-break: break-word;
     white-space: pre-wrap;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sheet-item-hint {
+    font-size: 12px;
+    color: var(--text-gray);
+    font-weight: normal;
+    white-space: normal;
+    line-height: 1.3;
+}
+
+.sheet-item.has-hint {
+    align-items: center;
 }
 
 .sheet-item-remove, .sheet-item-edit {

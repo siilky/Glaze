@@ -483,7 +483,7 @@ const onTriggerOpenImage = (e) => {
     } else {
         logger.debug('[App] Dispatching open-image-viewer');
         window.dispatchEvent(new CustomEvent('open-image-viewer', {
-            detail: { src, onCloseCallback }
+            detail: { src, description, onCloseCallback }
         }));
     }
 };
