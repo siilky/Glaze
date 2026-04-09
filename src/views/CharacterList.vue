@@ -290,6 +290,7 @@ const favorites = computed(() => {
 onMounted(() => {
   loadCharacters();
   window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
+  window.addEventListener('character-updated', loadCharacters);
 });
 
 // Custom Directive for Long Press
@@ -468,6 +469,7 @@ const handleCharClick = (e, char) => {
 };
 
 onUnmounted(() => {
+  window.removeEventListener('character-updated', loadCharacters);
 });
 
 defineExpose({ onAddCharacter });

@@ -26,6 +26,7 @@ const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/Lor
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
+const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
@@ -796,6 +797,7 @@ watch(currentView, () => {
   <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
   <NotificationsSheet />
+  <DragDropOverlay />
 
 </template>
 
