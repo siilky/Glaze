@@ -1,11 +1,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
 
@@ -23,7 +24,9 @@ const apiSettings = reactive({
     contextSize: 32000,
     temp: 0.7,
     topP: 0.9,
-    stream: true
+    stream: true,
+    autoHideImages: false,
+    autoHideImagesN: 1
 });
 
 const showApiKey = ref(false);
@@ -43,6 +46,38 @@ const activeApiPreset = computed(() => {
     return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
 });
 
+// --- Blacklist Warning ---
+let blacklistCountdownTimer = null;
+
+function showBlacklistWarning(providerName) {
+    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
+    let countdown = 10;
+    showBottomSheet({
+        title: providerName,
+        locked: true,
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:#ff9800"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
+            description: t('blacklist_warning_desc').replace('{providerName}', providerName),
+            glossaryChip: { term: 'api', hint: t('blacklist_glossary_hint') || 'Recommended providers are here:', label: t('blacklist_glossary_chip') || 'Providers' },
+            buttonText: `OK (${countdown})`,
+            buttonDisabled: true,
+            onButtonClick: closeBottomSheet
+        }
+    });
+    blacklistCountdownTimer = setInterval(() => {
+        countdown--;
+        if (bottomSheetState.value.bigInfo) {
+            bottomSheetState.value.bigInfo.buttonText = countdown > 0 ? `OK (${countdown})` : 'OK';
+            bottomSheetState.value.bigInfo.buttonDisabled = countdown > 0;
+        }
+        if (countdown <= 0) {
+            bottomSheetState.value.locked = false;
+            clearInterval(blacklistCountdownTimer);
+            blacklistCountdownTimer = null;
+        }
+    }, 1000);
+}
+
 function loadApiSettings() {
     apiSettings.endpoint = localStorage.getItem('api-endpoint') || '';
     apiSettings.key = localStorage.getItem('api-key') || '';
@@ -53,6 +88,8 @@ function loadApiSettings() {
     apiSettings.temp = parseFloat(localStorage.getItem('gz_api_temp')) || 0.7;
     apiSettings.topP = parseFloat(localStorage.getItem('gz_api_topp')) || 0.9;
     apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
+    apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
 }
 
 function saveApiSetting(key, value) {
@@ -72,7 +109,9 @@ function saveApiSetting(key, value) {
             'api-context': 'context',
             'gz_api_temp': 'temp',
             'gz_api_topp': 'topp',
-            'gz_api_stream': 'stream'
+            'gz_api_stream': 'stream',
+            'gz_api_auto_hide_images': 'auto_hide_images',
+            'gz_api_auto_hide_images_n': 'auto_hide_images_n'
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -86,7 +125,14 @@ function onApiInput(key, value) {
     saveApiSetting(key, value);
     if (key === 'api-endpoint' || key === 'api-key') {
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(checkConnection, 1000);
+        debounceTimer = setTimeout(() => {
+            if (key === 'api-endpoint') {
+                const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || value;
+                const blacklisted = getBlacklistedProvider(endpoint);
+                if (blacklisted) showBlacklistWarning(blacklisted.name);
+            }
+            checkConnection();
+        }, 1000);
     }
 }
 
@@ -100,6 +146,7 @@ function flushApiDebounce() {
 
 async function checkConnection() {
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || apiSettings.endpoint;
+
     if (!endpoint) {
         apiStatus.value = 'failed';
         return;
@@ -202,7 +249,9 @@ function createNewApiPreset() {
                     context: apiSettings.contextSize,
                     temp: apiSettings.temp,
                     topp: apiSettings.topP,
-                    stream: apiSettings.stream
+                    stream: apiSettings.stream,
+                    auto_hide_images: apiSettings.autoHideImages,
+                    auto_hide_images_n: apiSettings.autoHideImagesN
                 };
 
                 apiPresets.value.push(newPreset);
@@ -229,6 +278,9 @@ function applyApiPreset(p) {
     apiSettings.topP = p.topp;
     apiSettings.stream = p.stream;
     
+    apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
+    apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
+    
     saveApiSetting('api-endpoint', p.endpoint);
     saveApiSetting('api-key', p.key);
     saveApiSetting('api-model', p.model);
@@ -237,6 +289,8 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_temp', p.temp);
     saveApiSetting('gz_api_topp', p.topp);
     saveApiSetting('gz_api_stream', p.stream);
+    saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
+    saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
     
     checkConnection();
 }
@@ -327,7 +381,7 @@ function openApiPresetSelector() {
         const item = {
             label: p.name,
             sublabel: isActive ? (t('preset_active') || 'Active') : '',
-            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="' + (isActive ? 'var(--vk-blue)' : 'var(--text-gray)') + '"/></svg>',
+            icon: getPresetIcon(p.endpoint, isActive),
             onClick: () => {
                 applyApiPreset(p);
                 closeBottomSheet();
@@ -365,9 +419,29 @@ function openApiPresetSelector() {
     });
 }
 
+// --- Favicon helper ---
+function getPresetIcon(endpoint, isActive) {
+    const dotColor = isActive ? 'var(--vk-blue)' : 'var(--text-gray)';
+    const dotSvg = `<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg>`;
+
+    if (!endpoint) return dotSvg;
+
+    let origin;
+    try {
+        const href = /^https?:\/\//i.test(endpoint) ? endpoint : 'http://' + endpoint;
+        origin = new URL(href).origin;
+    } catch {
+        return dotSvg;
+    }
+
+    const faviconUrl = origin + '/favicon.ico';
+    const escapedDot = dotSvg.replace(/'/g, '&#39;');
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"><img src="${faviconUrl}" style="width:100%;height:100%;border-radius:6px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><svg style="display:none;fill:currentColor;width:100%;height:100%;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg></span>`;
+}
+
 // --- Helpers ---
 const t = (key) => {
-    return translations[currentLang] ? translations[currentLang][key] : key;
+    return translations[currentLang.value] ? translations[currentLang.value][key] : key;
 };
 
 // --- Lifecycle ---
@@ -396,6 +470,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
     flushApiDebounce();
+    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
 });
 </script>
 
@@ -441,7 +516,7 @@ onBeforeUnmount(() => {
                     </div>
                 </Transition>
                 <div class="menu-group">
-                    <div class="section-header" data-i18n="section_connection">Connection</div>
+                    <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
                     <div class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -456,7 +531,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     <div class="settings-item">
-                        <label>API Key</label>
+                        <label>API Key <HelpTip term="apikey"/></label>
                         <div style="position: relative;">
                             <input :type="showApiKey ? 'text' : 'password'" v-model="apiSettings.key" @input="onApiInput('api-key', $event.target.value)" placeholder="sk-..." style="width: 100%; padding-right: 44px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             <div @click="showApiKey = !showApiKey" style="position: absolute; right: 0; top: 0; bottom: 0; width: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
@@ -467,15 +542,15 @@ onBeforeUnmount(() => {
                     </div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
-                            <label data-i18n="label_stream">Streaming response</label>
-                            <div class="settings-desc" data-i18n="desc_stream">Show text as it is being generated</div>
+                            <label>{{ t('label_stream') || 'Streaming response' }} <HelpTip term="streaming"/></label>
+                            <div class="settings-desc">{{ t('desc_stream') || 'Show text as it is being generated' }}</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.stream" @change="onApiInput('gz_api_stream', $event.target.checked)" class="vk-switch">
                     </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header" data-i18n="section_gen_params">Generation Parameters</div>
+                    <div class="section-header">{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/></div>
                     <div class="settings-item-range">
                         <div class="range-row">
                             <label data-i18n="label_temperature">Temperature</label>
@@ -498,9 +573,25 @@ onBeforeUnmount(() => {
                         <label data-i18n="label_context_size">Context Size</label>
                         <input type="number" v-model.number="apiSettings.contextSize" @input="onApiInput('api-context', $event.target.value)">
                     </div>
+
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }}</label>
+                            <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
+                    </div>
+
+                    <Transition name="fade-height">
+                        <div v-if="apiSettings.autoHideImages" class="settings-item" style="margin-top: 0; padding-top: 0;">
+                            <label>{{ t('label_auto_hide_images_n') || 'Responses count' }}</label>
+                            <input type="number" v-model.number="apiSettings.autoHideImagesN" @input="onApiInput('gz_api_auto_hide_images_n', $event.target.value)" min="1">
+                        </div>
+                    </Transition>
                 </div>
         </div>
     </SheetView>
+
 </template>
 
 <style scoped>

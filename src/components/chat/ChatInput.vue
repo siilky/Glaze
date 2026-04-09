@@ -4,8 +4,8 @@ import { formatInputPreview } from '@/utils/textFormatter.js';
 import RequestPreviewSheet from '@/components/sheets/RequestPreviewSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang } from '@/core/config/APPSettings.js';
-import { Keyboard } from '@capacitor/keyboard';
+import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
+import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
 import { attachRipple } from '@/core/services/ui.js';
 
@@ -25,11 +25,11 @@ const props = defineProps({
 
 const emit = defineEmits([
     'update:modelValue', 'send', 'scroll-to-bottom', 
-    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-regex',
+    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-regex', 'magic-image-gen', 'magic-glossary',
     'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection'
 ]);
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const chatInput = ref(null);
 const isComposing = ref(false);
@@ -39,12 +39,80 @@ const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
 const isSwitchingToDrawer = ref(false);
 const inputWrapper = ref(null);
 const kbListeners = [];
+const isMainFocused = ref(false);
+const isGuidanceFocused = ref(false);
+
+const isGuidanceMode = ref(false);
+const guidanceType = ref('send');
+const guidanceText = ref('');
+const guidanceInput = ref(null);
+
+const closeGuidance = () => {
+    if (guidanceText.value.trim() !== '') {
+        const confirmMsg = t('confirm_discard_changes') || 'Discard changes?';
+        if (!confirm(confirmMsg)) return;
+    }
+    isGuidanceMode.value = false;
+    guidanceText.value = '';
+};
+
+const toggleGuidanceMode = () => {
+    if (isGuidanceMode.value && guidanceType.value === 'send') {
+        closeGuidance();
+    } else {
+        isGuidanceMode.value = true;
+        guidanceType.value = 'send';
+        nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
+    }
+};
 
 const currentAction = computed(() => {
     if (props.isGenerating) return 'stop';
-    if (props.modelValue && props.modelValue.trim()) return 'send';
+    if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) return 'send';
     return 'impersonate';
 });
+
+const attachedImage = ref(null);
+const imageInput = ref(null);
+
+const triggerImageUpload = () => {
+    if (imageInput.value) imageInput.value.click();
+};
+
+const onImageSelected = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            attachedImage.value = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+    if (imageInput.value) imageInput.value.value = '';
+};
+
+const clearImage = () => {
+    attachedImage.value = null;
+};
+
+const handleSend = () => {
+    if (props.isGenerating) {
+        emit('send');
+    } else if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) {
+        emit('send', attachedImage.value, guidanceText.value);
+        attachedImage.value = null;
+        closeGuidance();
+    } else {
+        if (!isGuidanceMode.value || guidanceType.value !== 'impersonate') {
+            isGuidanceMode.value = true;
+            guidanceType.value = 'impersonate';
+            nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
+        } else {
+            emit('magic-impersonate', guidanceText.value);
+            closeGuidance();
+        }
+    }
+};
 
 
 const requestPreviewSheet = ref(null);
@@ -182,16 +250,29 @@ function onPaste(e) {
 }
 
 function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !props.isImpersonating) {
-        e.preventDefault();
-        const el = chatInput.value;
-        if (!el) return;
-        const caret = getCaretIndex(el);
-        const text = props.modelValue || '';
-        const before = text.slice(0, caret);
-        const after = text.slice(caret);
-        emit('update:modelValue', before + '\n' + after);
-        nextTick(() => updateInputPreview(caret + 1));
+    if (e.key === 'Enter') {
+        const isMobile = Capacitor.isNativePlatform() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const shouldSend = (!isMobile && enterToSubmit.value) ? !e.shiftKey && !e.ctrlKey : (e.shiftKey || e.ctrlKey);
+        
+        if (shouldSend) {
+            e.preventDefault();
+            handleSend();
+        } else {
+            if (e.target.tagName && e.target.tagName.toLowerCase() === 'textarea') {
+                return;
+            }
+            if (!props.isImpersonating) {
+                e.preventDefault();
+                const el = chatInput.value;
+                if (!el) return;
+                const caret = getCaretIndex(el);
+                const text = props.modelValue || '';
+                const before = text.slice(0, caret);
+                const after = text.slice(caret);
+                emit('update:modelValue', before + '\n' + after);
+                nextTick(() => updateInputPreview(caret + 1));
+            }
+        }
     }
 }
 
@@ -233,7 +314,7 @@ const toggleMagicMenu = async () => {
     } else {
         if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
             isSwitchingToDrawer.value = true;
-            await Keyboard.hide().catch(() => {});
+            await hideKeyboard();
         } else {
             isMagicMenuVisible.value = true;
         }
@@ -241,8 +322,21 @@ const toggleMagicMenu = async () => {
 };
 
 const onFocus = () => {
+    isMainFocused.value = true;
     // Close drawer when user focuses input to type
     // isMagicMenuVisible.value = false; // Don't close, let keyboard cover it
+};
+
+const onBlur = () => {
+    isMainFocused.value = false;
+};
+
+const onGuidanceFocus = () => {
+    isGuidanceFocused.value = true;
+};
+
+const onGuidanceBlur = () => {
+    isGuidanceFocused.value = false;
 };
 
 const closeMagicMenu = (e) => {
@@ -255,7 +349,7 @@ const closeMagicMenu = (e) => {
 
 const openFullScreenEditor = async () => {
     if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
-        await Keyboard.hide().catch(() => {});
+        await hideKeyboard();
     }
     window.dispatchEvent(new CustomEvent('open-fs-request', {
         detail: {
@@ -281,12 +375,12 @@ onMounted(async () => {
 
     // Register keyboard listeners with proper lifecycle management
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', () => {
+        kbListeners.push(await onKeyboardShow(() => {
             isKeyboardOpen.value = true;
             isMagicMenuVisible.value = false;
             isSwitchingToDrawer.value = false;
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
+        kbListeners.push(await onKeyboardHide(() => { 
             isKeyboardOpen.value = false;
             if (isSwitchingToDrawer.value) {
                 isMagicMenuVisible.value = true;
@@ -314,7 +408,7 @@ defineExpose({
 </script>
 
 <template>
-    <div class="chat-input-container" :class="{ 'drawer-open': isMagicMenuVisible || (isKeyboardOpen && Capacitor.getPlatform() !== 'android') }">
+    <div class="chat-input-container" :class="{ 'drawer-open': isMagicMenuVisible || isSwitchingToDrawer, 'keyboard-open': isKeyboardOpen }">
         <div class="chat-status-gradient-bottom"></div>
         <div v-if="!isSearchMode" id="scroll-to-bottom" class="scroll-bottom-btn" :class="{ visible: showScrollButton }" @click="emit('scroll-to-bottom')">
             <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M12 16.17L5.59 9.76L7 8.35L12 13.35L17 8.35L18.41 9.76L12 16.17Z"/></svg>
@@ -322,7 +416,30 @@ defineExpose({
         <div class="chat-input-content">
             <div class="chat-input-bar" :class="{ 'mode-normal': !isSelectionMode && !isSearchMode, 'mode-special': isSelectionMode || isSearchMode }" @click.stop>
                 <div class="input-row-container">
-                    <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode">
+                    <div v-if="attachedImage && !isSelectionMode && !isSearchMode" class="attached-image-preview">
+                        <img :src="attachedImage" alt="Attached preview" />
+                        <div class="remove-image-btn" @click.stop="clearImage">
+                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </div>
+                    </div>
+                    <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode" :class="{ 'with-guidance': isGuidanceMode && guidanceType === 'send' }">
+                        <div v-if="isGuidanceMode && guidanceType === 'send'" class="guidance-input-container" :class="{ 'dimmed': isMainFocused }">
+                            <div class="guidance-main">
+                                <div class="guidance-header">{{ t('guided_generation') || 'GUIDED GENERATION' }}</div>
+                                <textarea
+                                    class="guidance-editable"
+                                    v-model="guidanceText"
+                                    :placeholder="t('guidance_placeholder') || 'System Instruction...'"
+                                    rows="1"
+                                    ref="guidanceInput"
+                                    @focus="onGuidanceFocus"
+                                    @blur="onGuidanceBlur"
+                                ></textarea>
+                            </div>
+                            <div class="close-guidance-btn" @click.stop="closeGuidance">
+                                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </div>
+                        </div>
                         <template v-if="isSearchMode">
                             <div class="search-counts-wrapper">
                                 <div style="color: var(--text-gray); font-size: 16px; font-weight: 500;">
@@ -338,8 +455,28 @@ defineExpose({
                                 </div>
                             </div>
                         </template>
+                        <div v-else-if="isGuidanceMode && guidanceType === 'impersonate'" class="impersonate-inline-container" :class="{ 'dimmed': isMainFocused }">
+                            <div class="guidance-main" style="width: 100%;">
+                                <div class="guidance-header">{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}</div>
+                                <textarea
+                                    class="guidance-editable"
+                                    v-model="guidanceText"
+                                    :placeholder="t('impersonate_guidance_placeholder') || 'Instruction (optional)...'"
+                                    rows="1"
+                                    ref="guidanceInput"
+                                    @input="resizeTextarea"
+                                    @keydown="onKeyDown"
+                                    @focus="onGuidanceFocus"
+                                    @blur="onGuidanceBlur"
+                                    style="font-size: 16px; padding: 0; min-height: 24px;"
+                                ></textarea>
+                            </div>
+                            <div class="close-guidance-btn" @click.stop="closeGuidance" style="margin-left: 12px; margin-top: auto; margin-bottom: auto; background: transparent;">
+                                <svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </div>
+                        </div>
                         <template v-else>
-                            <div id="chat-input" ref="chatInput" class="chat-input-editable" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
+                            <div id="chat-input" ref="chatInput" class="chat-input-editable" :class="{'dimmed': isGuidanceMode && !isMainFocused}" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" enterkeyhint="enter" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @blur="onBlur" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
                             <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;"><svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span></div>
                         </template>
                     </div>
@@ -367,16 +504,23 @@ defineExpose({
                             <div class="chat-btn circle-btn" id="btn-magic" @click.stop="toggleMagicMenu">
                                 <svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
                             </div>
+                            <div class="chat-btn circle-btn" @click.stop="triggerImageUpload">
+                                <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+                            </div>
                             <div class="chat-btn circle-btn" @click.stop="openFullScreenEditor">
                                 <svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
+                            </div>
+                            <div class="chat-btn circle-btn" :class="{ 'active': isGuidanceMode && guidanceType === 'send' }" @click.stop="toggleGuidanceMode">
+                                <svg viewBox="0 0 24 24"><path d="M9 5v2h6.59L4 18.59 5.41 20 17 8.41V15h2V5H9z"/></svg>
                             </div>
                         </div>
 
                         <div class="send-btn-wrapper">
-                            <div class="chat-action-btn" @click="isGenerating ? emit('send') : ((modelValue && modelValue.trim()) ? emit('send') : emit('magic-impersonate'))">
+                            <div class="chat-action-btn" @click="handleSend">
                                 <div class="btn-icon-wrapper">
                                     <Transition name="btn-icon-fade">
                                         <svg v-if="currentAction === 'stop'" key="stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+                                        <svg v-else-if="isGuidanceMode" key="confirm" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                         <svg v-else-if="currentAction === 'send'" key="send" viewBox="0 0 24 24" style="margin-left: 2px;"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
                                         <svg v-else key="impersonate" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
                                     </Transition>
@@ -401,15 +545,58 @@ defineExpose({
                 @magic-presets="emit('magic-presets')"
                 @magic-lorebooks="emit('magic-lorebooks')"
                 @magic-regex="emit('magic-regex')"
+                @magic-image-gen="emit('magic-image-gen')"
+                @magic-glossary="emit('magic-glossary')"
                 @request-preview="openRequestPreview"
                 @add-block="() => {}"
             />
+            <input type="file" ref="imageInput" accept="image/png, image/jpeg, image/webp" style="display: none" @change="onImageSelected" />
         </div>
     </div>
     <RequestPreviewSheet ref="requestPreviewSheet" />
 </template>
 
 <style scoped>
+.attached-image-preview {
+    position: relative;
+    align-self: flex-start;
+    margin-bottom: 8px;
+    margin-left: 18px;
+    border-radius: 12px;
+    overflow: hidden;
+    max-width: 150px;
+    max-height: 150px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+}
+.attached-image-preview img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    display: block;
+}
+.remove-image-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    background: rgba(0,0,0,0.6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: white;
+}
+.remove-image-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+}
+
 .chat-input-container {
     position: relative;
     display: flex;
@@ -433,6 +620,10 @@ defineExpose({
     padding-bottom: var(--keyboard-height, 300px);
 }
 
+.chat-input-container.keyboard-open .chat-input-content {
+    padding-bottom: var(--keyboard-overlap, 0px);
+}
+
 .chat-input-container.drawer-open .chat-input-bar {
     margin-bottom: 10px;
 }
@@ -450,6 +641,10 @@ defineExpose({
     justify-content: flex-start;
     -webkit-user-select: text;
     user-select: text;
+}
+
+.chat-input-container.keyboard-open .chat-input-bar {
+    margin-bottom: 10px;
 }
 
 .chat-input-buttons-row {
@@ -599,6 +794,7 @@ defineExpose({
     position: relative;
     flex: 1;
     display: flex;
+    flex-direction: column;
     overflow: hidden;
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
@@ -715,6 +911,99 @@ defineExpose({
     flex-shrink: 0;
     overflow: hidden;
 }
+
+/* Guidance CSS */
+.guidance-input-container {
+    display: flex;
+    align-items: center;
+    background: transparent;
+    border-bottom: 1px dashed var(--border-color, rgba(0,0,0,0.1));
+    padding: 8px 8px 8px 18px;
+    animation: slideDownFade 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    flex-shrink: 0;
+}
+
+.guidance-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.guidance-header {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.guidance-editable {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-black);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    field-sizing: content;
+    padding: 0;
+    margin: 0;
+    line-height: inherit;
+    min-height: 20px;
+    max-height: 80px;
+    border-radius: 0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+.guidance-editable::-webkit-scrollbar { display: none; }
+.guidance-editable { -ms-overflow-style: none; scrollbar-width: none; }
+
+.guidance-editable::placeholder { color: var(--text-gray); }
+
+.close-guidance-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.05);
+    color: var(--text-gray);
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+.close-guidance-btn:active { background: rgba(0,0,0,0.1); }
+.close-guidance-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+.impersonate-inline-container {
+    display: flex;
+    align-items: center;
+    padding: 12px 18px;
+    width: 100%;
+}
+
+.circle-btn.active {
+    background-color: var(--vk-blue) !important;
+    color: white !important;
+    border-color: var(--vk-blue) !important;
+}
+.circle-btn.active svg { fill: white !important; }
+
+.chat-input-editable.dimmed,
+.impersonate-inline-container.dimmed,
+.guidance-input-container.dimmed {
+    opacity: 0.5;
+}
+
+@keyframes slideDownFade {
+    0% { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+    100% { opacity: 1; max-height: 100px; }
+}
+
+:global(body.dark-theme) .guidance-editable { color: #fff; }
 
 .chat-action-btn:active {
     transform: scale(0.95);

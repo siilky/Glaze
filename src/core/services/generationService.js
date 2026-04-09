@@ -18,6 +18,16 @@ export function getLastPrompt() {
     return lastPrompt;
 }
 
+/**
+ * Strips embedded base64 media from text so it doesn't inflate token counts limits.
+ */
+function stripEmbeddedMedia(text) {
+    if (!text || text.length < 256) return text;
+    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
+    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
+    return cleaned;
+}
+
 // --- Helpers ---
 
 function getEffectiveApiConfig() {
@@ -57,15 +67,35 @@ function getWorker() {
                 globalThis._workerQueue.delete(id);
             }
         };
+
+        globalThis._genWorker.onerror = (e) => {
+            console.error("Generation worker crashed:", e);
+            for (const [id, { reject }] of globalThis._workerQueue) {
+                reject(new Error("Worker crashed: " + (e.message || "Unknown error")));
+            }
+            globalThis._workerQueue.clear();
+            globalThis._genWorker.terminate();
+            globalThis._genWorker = null;
+        };
     }
     return globalThis._genWorker;
 }
 
 function processPromptAsync(payload) {
     const worker = getWorker();
+    const WORKER_TIMEOUT = 30000;
     return new Promise((resolve, reject) => {
         const id = ++globalThis._msgIdCounter;
-        globalThis._workerQueue.set(id, { resolve, reject });
+
+        const timer = setTimeout(() => {
+            globalThis._workerQueue.delete(id);
+            reject(new Error("Prompt building timed out (worker did not respond within 30s)"));
+        }, WORKER_TIMEOUT);
+
+        globalThis._workerQueue.set(id, {
+            resolve: (data) => { clearTimeout(timer); resolve(data); },
+            reject: (err) => { clearTimeout(timer); reject(err); }
+        });
         worker.postMessage({ id, type: 'generateChatResponse', payload });
     });
 }
@@ -76,6 +106,7 @@ export async function generateChatResponse({
     history,
     authorsNote,
     summary,
+    guidanceText,
     type = 'normal',
     controller,
     callbacks
@@ -84,7 +115,7 @@ export async function generateChatResponse({
     let apiConfig = getEffectiveApiConfig();
     let { apiKey, apiUrl, model, stream, requestReasoning, temp, topP, maxTokens, contextSize } = apiConfig;
 
-    const t = (key) => translations[currentLang]?.[key] || key;
+    const t = (key) => translations[currentLang.value]?.[key] || key;
 
     if (!apiUrl || !model) {
         showBottomSheet({
@@ -113,6 +144,13 @@ export async function generateChatResponse({
     // Merge Settings from Preset
     const mergePrompts = activePreset?.mergePrompts || false;
     const mergeRole = activePreset?.mergeRole || 'system';
+
+    // NoAssistant Settings from Preset
+    const noAssistant = activePreset?.noAssistant || false;
+    const stopString = activePreset?.stopString || '';
+    const userPrefix = activePreset?.userPrefix || '';
+    const charPrefix = activePreset?.charPrefix || '';
+    const squashRole = activePreset?.squashRole || 'assistant';
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         requestReasoning = activePreset.reasoningEnabled;
@@ -149,8 +187,14 @@ export async function generateChatResponse({
             activePreset,
             mergePrompts,
             mergeRole,
+            noAssistant,
+            userPrefix,
+            charPrefix,
+            squashRole,
             personaObj,
             authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+            guidanceText,
+            guidanceType: type,
             lorebooks: lorebookState.lorebooks,
             globalSettings: lorebookState.globalSettings,
             activations: lorebookState.activations,
@@ -210,6 +254,10 @@ export async function generateChatResponse({
         requestBody.max_tokens = maxTokens;
     }
 
+    if (stopString) {
+        requestBody.stop = [stopString];
+    }
+
     // Google Gemini specific reasoning config
     if (apiUrl.includes('generativelanguage.googleapis.com')) {
         if (requestReasoning) {
@@ -232,8 +280,16 @@ export async function generateChatResponse({
     requestBody.messages = requestBody.messages.map(m => {
         const cleanMsg = {
             role: m.role,
-            content: m.content
+            content: stripEmbeddedMedia(m.content)
         };
+
+        if (m.image) {
+            cleanMsg.content = [
+                { type: "text", text: m.content || "" },
+                { type: "image_url", image_url: { url: m.image } }
+            ];
+        }
+
         if (m.name) cleanMsg.name = m.name;
         return cleanMsg;
     });
@@ -272,6 +328,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
 
     const mergePrompts = activePreset?.mergePrompts || false;
     const mergeRole = activePreset?.mergeRole || 'system';
+    const noAssistant = activePreset?.noAssistant || false;
+    const userPrefix = activePreset?.userPrefix || '';
+    const charPrefix = activePreset?.charPrefix || '';
+    const squashRole = activePreset?.squashRole || 'assistant';
     const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
 
     const anData = authorsNote;
@@ -303,6 +363,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             activePreset,
             mergePrompts,
             mergeRole,
+            noAssistant,
+            userPrefix,
+            charPrefix,
+            squashRole,
             personaObj,
             authorsNote: (anData && anData.enabled) ? anData : null,
             lorebooks: lorebookState.lorebooks,

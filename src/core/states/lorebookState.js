@@ -57,6 +57,8 @@ export async function initLorebookState() {
                     if (!entry.id) {
                         entry.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
                     }
+                    if (entry.position === 0) entry.position = 'worldInfoBefore';
+                    if (entry.position === 1) entry.position = 'worldInfoAfter';
                 });
             });
         }
@@ -67,18 +69,31 @@ export async function initLorebookState() {
 }
 
 export async function saveLorebooks() {
-    // Deep copy to avoid proxy issues with IndexedDB
-    await db.set('gz_lorebooks', {
+    await db.queuedSet('gz_lorebooks', {
         lorebooks: JSON.parse(JSON.stringify(lorebookState.lorebooks)),
         settings: JSON.parse(JSON.stringify(lorebookState.globalSettings)),
         activations: JSON.parse(JSON.stringify(lorebookState.activations))
     });
 }
 
-// Auto-save on changes
+// Auto-save on changes with debounce to prevent rapid IndexedDB writes on keystroke
+let _lorebookSaveTimer = null;
 watch(() => lorebookState, () => {
-    saveLorebooks();
+    if (_lorebookSaveTimer) clearTimeout(_lorebookSaveTimer);
+    _lorebookSaveTimer = setTimeout(() => {
+        saveLorebooks();
+        _lorebookSaveTimer = null;
+    }, 500);
 }, { deep: true });
+
+// Call when closing the lorebook editor to flush any pending debounced save
+export function flushLorebookSave() {
+    if (_lorebookSaveTimer) {
+        clearTimeout(_lorebookSaveTimer);
+        _lorebookSaveTimer = null;
+    }
+    return saveLorebooks();
+}
 
 export function createLorebook(name = 'New World Info') {
     const newLb = {
@@ -353,7 +368,7 @@ export async function importSTLorebook(json, fileName = 'Imported') {
                 caseSensitive: entry.caseSensitive ?? null,
                 useGroupScoring: entry.useGroupScoring ?? null,
                 scanDepth: entry.scanDepth,
-                position: entry.position ?? 0,
+                position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
                 characterFilter: entry.characterFilter,
                 preventRecursion: entry.preventRecursion || false,
                 delayUntilRecursion: entry.delayUntilRecursion || false,
@@ -386,7 +401,7 @@ export function exportSTLorebook(lorebook) {
             constant: entry.constant || false,
             selective: (entry.secondary_keys && entry.secondary_keys.length > 0),
             order: entry.order ?? 100,
-            position: entry.position ?? 0,
+            position: (entry.position === 'worldInfoBefore') ? 0 : (entry.position === 'worldInfoAfter') ? 1 : (entry.position ?? 0),
             disable: entry.enabled === false,
             displayIndex: index,
             addMemo: true,

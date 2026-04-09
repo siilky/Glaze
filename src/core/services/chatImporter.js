@@ -13,59 +13,98 @@ import { addMessageStats, addRegenerationStats } from './statsService.js';
  * @returns {Promise<Object>} - Result with charName and sessionId.
  */
 export async function importSillyTavernChat(file, characterId, userPersona) {
-    const text = await readFile(file);
     let messages = [];
     let metadata = null;
+    let isJsonArray = false;
 
-    // Try parsing as full JSON (Array) first
-    try {
-        const json = JSON.parse(text);
-        if (Array.isArray(json)) {
-            let lastTimestamp = 0;
-            messages = json.map(obj => {
-                const scMsg = convertMessage(obj, userPersona);
-                if (scMsg.timestamp <= lastTimestamp) {
-                    scMsg.timestamp = lastTimestamp + 1;
-                }
-                lastTimestamp = scMsg.timestamp;
-                return scMsg;
-            });
+    // Check if it's a JSON array by reading a small chunk
+    await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const str = e.target.result || "";
+            if (str.trimStart().startsWith('[')) {
+                isJsonArray = true;
+            }
+            resolve();
+        };
+        reader.onerror = () => resolve();
+        reader.readAsText(file.slice(0, 100));
+    });
+
+    if (isJsonArray) {
+        try {
+            const text = await readFile(file);
+            const json = JSON.parse(text);
+            if (Array.isArray(json)) {
+                let lastTimestamp = 0;
+                messages = json.map(obj => {
+                    const scMsg = convertMessage(obj, userPersona);
+                    if (scMsg.timestamp <= lastTimestamp) {
+                        scMsg.timestamp = lastTimestamp + 1;
+                    }
+                    lastTimestamp = scMsg.timestamp;
+                    return scMsg;
+                });
+            }
+        } catch (e) {
+            console.warn("Failed to parse JSON array mode, proceeding to JSONL stream", e);
         }
-    } catch (e) {
-        // Not a JSON array, proceed to JSONL
     }
 
     if (messages.length === 0) {
-        // Split by newline and filter empty lines (JSONL format)
-        const lines = text.split(/\r?\n/).filter(line => line.trim());
-
-        if (lines.length === 0) throw new Error("Empty file");
-
-        // Process lines
         let lastTimestamp = 0;
-        for (let i = 0; i < lines.length; i++) {
-            try {
-                const obj = JSON.parse(lines[i]);
+        let lineIndex = 0;
+        let remainder = '';
 
-                // Skip metadata line (usually the first line in ST exports)
+        const processLine = (line) => {
+            if (!line.trim()) return;
+            try {
+                const obj = JSON.parse(line);
                 if (obj.chat_metadata) {
                     metadata = obj.chat_metadata;
-                    continue;
+                } else {
+                    const scMsg = convertMessage(obj, userPersona);
+                    if (scMsg.timestamp <= lastTimestamp) {
+                        scMsg.timestamp = lastTimestamp + 1;
+                    }
+                    lastTimestamp = scMsg.timestamp;
+                    messages.push(scMsg);
                 }
-
-                // Convert message
-                const scMsg = convertMessage(obj, userPersona);
-
-                // Ensure unique timestamp to prevent selection bugs
-                if (scMsg.timestamp <= lastTimestamp) {
-                    scMsg.timestamp = lastTimestamp + 1;
-                }
-                lastTimestamp = scMsg.timestamp;
-
-                messages.push(scMsg);
             } catch (e) {
-                console.warn("Skipping invalid JSON line at index " + i, e);
+                console.warn(`Skipping invalid JSON line at index ${lineIndex}`, e);
             }
+            lineIndex++;
+        };
+
+        if (typeof file.stream === 'function') {
+            const stream = file.stream();
+            const reader = stream.getReader();
+            const decoder = new TextDecoder('utf-8');
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                const textChunk = remainder + chunk;
+                const lines = textChunk.split(/\r?\n/);
+                remainder = lines.pop();
+
+                for (let i = 0; i < lines.length; i++) {
+                    processLine(lines[i]);
+                }
+            }
+        } else {
+            // Fallback for environments lacking stream()
+            const text = await readFile(file);
+            const lines = text.split(/\r?\n/);
+            for (let i = 0; i < lines.length; i++) {
+                processLine(lines[i]);
+            }
+        }
+
+        if (remainder.trim()) {
+            processLine(remainder);
         }
     }
 
@@ -229,6 +268,7 @@ export async function exportSillyTavernChat(chat) {
         if (msg.swipesMeta && Array.isArray(msg.swipesMeta)) {
             stMsg.swipe_info = msg.swipesMeta.map(meta => {
                 const info = { extra: {} };
+                if (!meta) return info;
                 if (meta.reasoning) info.extra.reasoning = meta.reasoning;
                 // Gen time reconstruction (approximate)
                 if (meta.genTime) {
@@ -295,7 +335,7 @@ export function triggerChatImport(characterId, userPersona, onImport) {
             }
         } catch (error) {
             console.error("Import failed:", error);
-            const t = translations[currentLang];
+            const t = translations[currentLang.value];
             showBottomSheet({
                 title: t?.title_error || "Error",
                 bigInfo: {

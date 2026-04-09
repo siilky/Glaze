@@ -1,21 +1,31 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 const props = defineProps({
     visible: Boolean,
+    locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
     title: String,
+    helpTip: String,
     content: [String, Object], // HTML string or DOM node
     items: Array, // [{ label, icon, iconColor, onClick, isDestructive, actions: [{icon, color, onClick}] }]
     headerAction: Object, // { icon, onClick }
-    bigInfo: Object, // { icon, description, buttonText, onButtonClick }
+    bigInfo: Object, // { icon, description, buttonText, buttonDisabled, onButtonClick, glossaryChip: { term, label } }
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object // { placeholder, value, confirmLabel, onConfirm }
 });
 
 const emit = defineEmits(['close']);
+
+function openGlossaryChip(term) {
+    emit('close');
+    nextTick(() => {
+        window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term } }));
+    });
+}
 
 function close() {
     // Hide keyboard and blur active element before closing
@@ -26,7 +36,7 @@ function close() {
             active.blur();
         }
         if (Capacitor.isNativePlatform()) {
-            Keyboard.hide().catch(() => {});
+            hideKeyboard();
         }
     }
     emit('close');
@@ -49,18 +59,13 @@ watch(() => props.input, (newVal) => {
         isLocalKeyboardOpen.value = true;
         
         // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
-        const cs = getComputedStyle(document.documentElement);
-        const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-        if (overlap === '0px' || !overlap) {
-            const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-            document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-        }
+        applyKeyboardOverlap();
 
         nextTick(() => {
             if (inputRef.value) {
                 inputRef.value.focus();
                 if (Capacitor.isNativePlatform()) {
-                    Keyboard.show().catch(() => {});
+                    showKeyboard();
                 }
             }
         });
@@ -103,7 +108,7 @@ function onHandleTouchMove(e) {
 
 function onHandleTouchEnd() {
     isDragging.value = false;
-    if (currentDragY.value > 80) {
+    if (!props.locked && currentDragY.value > 80) {
         close();
     }
     currentDragY.value = 0;
@@ -135,16 +140,11 @@ function checkFocus() {
             isLocalKeyboardOpen.value = true;
             
             // Ensure overlap is set so the sheet can actually rise
-            const cs = getComputedStyle(document.documentElement);
-            const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-            if (overlap === '0px' || !overlap) {
-                const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-                document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-            }
+            applyKeyboardOverlap();
 
             // Force keyboard on Android if needed
             if (Capacitor.isNativePlatform()) {
-                Keyboard.show().catch(() => {});
+                showKeyboard();
             }
         } else {
             isLocalKeyboardOpen.value = false;
@@ -170,15 +170,14 @@ onMounted(async () => {
     document.addEventListener('focusout', () => { setTimeout(checkFocus, 50); });
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', (info) => {
+        kbListeners.push(await onKeyboardShow((info) => {
             checkFocus();
             // Height might not be set yet if it's the first time
             if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+                applyKeyboardOverlap(info.keyboardHeight);
             }
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
+        kbListeners.push(await onKeyboardHide(() => { 
             isLocalKeyboardOpen.value = false; 
         }));
     }
@@ -192,7 +191,7 @@ onBeforeUnmount(() => {
 
 <template>
     <div class="modal-overlay" :class="{ visible: visible }">
-        <div class="modal-backdrop" @click="close"></div>
+        <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
         <div class="bottom-sheet-content" @click.stop 
              :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
              :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen }">
@@ -202,7 +201,10 @@ onBeforeUnmount(() => {
                  @touchend="onHandleTouchEnd"
             ></div>
             <div class="sheet-header" v-if="title || headerAction">
-                <div class="sheet-title">{{ title }}</div>
+                <div class="sheet-title">
+                    {{ title }}
+                    <HelpTip v-if="helpTip" :term="helpTip" />
+                </div>
                 <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
             </div>
             
@@ -218,16 +220,18 @@ onBeforeUnmount(() => {
                 <div v-if="bigInfo" class="sheet-big-info">
                     <div class="big-info-icon" v-html="bigInfo.icon"></div>
                     <div class="big-info-desc">{{ bigInfo.description }}</div>
-                    <div class="sheet-big-info-btn" @click="bigInfo.onButtonClick">{{ bigInfo.buttonText }}</div>
+                    <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
+                    <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
                 </div>
 
                 <!-- List Items -->
                 <div v-if="items && items.length" class="sheet-list">
-                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered }" @click="item.onClick">
+                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
                         <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
-                        <span class="sheet-item-content" :class="{ 'text-destructive': item.isDestructive }">
-                            {{ item.label }}
-                        </span>
+                        <div class="sheet-item-content">
+                            <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
+                            <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                        </div>
                         
                         <!-- Item Actions (Buttons on the right) -->
                         <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
@@ -318,6 +322,12 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-big-info-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .sheet-item.centered {
     justify-content: center;
 }
@@ -404,6 +414,9 @@ onBeforeUnmount(() => {
 .sheet-title {
     font-size: 18px;
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .sheet-action-btn {
@@ -455,6 +468,21 @@ onBeforeUnmount(() => {
     color: var(--text-black);
     word-break: break-word;
     white-space: pre-wrap;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sheet-item-hint {
+    font-size: 12px;
+    color: var(--text-gray);
+    font-weight: normal;
+    white-space: normal;
+    line-height: 1.3;
+}
+
+.sheet-item.has-hint {
+    align-items: center;
 }
 
 .sheet-item-remove, .sheet-item-edit {
@@ -522,6 +550,34 @@ onBeforeUnmount(() => {
     line-height: 1.5;
     word-break: break-word;
     white-space: pre-wrap;
+}
+
+.big-info-chip-line {
+    font-size: 14px;
+    color: var(--text-gray);
+    margin-bottom: 18px;
+    line-height: 1.5;
+}
+
+.big-info-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 6px;
+    background: rgba(var(--vk-blue-rgb), 0.12);
+    color: var(--vk-blue);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.2);
+    cursor: pointer;
+    vertical-align: baseline;
+    transition: background 0.15s, opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+}
+.big-info-chip:active {
+    background: rgba(var(--vk-blue-rgb), 0.22);
+    opacity: 0.8;
 }
 
 .sheet-big-info-btn {
@@ -597,7 +653,7 @@ onBeforeUnmount(() => {
     opacity: 1 !important;
     visibility: hidden;
     transition: visibility 0s linear 0.3s !important;
-    z-index: 10000 !important;
+    z-index: 12000 !important;
 }
 
 .modal-overlay.visible {
@@ -809,6 +865,7 @@ body.dark-theme .triggered-item-card.is-active {
     color: var(--text-light-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }

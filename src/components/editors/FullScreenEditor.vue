@@ -1,8 +1,10 @@
 <script setup>
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { isKeyboardOpen } from '@/core/services/keyboardHandler.js';
+import { ref, watch } from 'vue';
 
-defineProps({
+const props = defineProps({
     modelValue: {
         type: String,
         default: ''
@@ -15,6 +17,26 @@ defineProps({
 
 const emit = defineEmits(['update:modelValue', 'save', 'close']);
 
+const initialValue = ref('');
+
+watch(() => props.visible, (newVal) => {
+    if (newVal) {
+        initialValue.value = props.modelValue;
+    }
+});
+
+const handleClose = () => {
+    if (props.modelValue !== initialValue.value) {
+        const confirmMsg = translations[currentLang.value]?.confirm_discard_changes || 'Discard changes?';
+        if (!confirm(confirmMsg)) {
+            return;
+        }
+        emit('update:modelValue', initialValue.value);
+        emit('save', initialValue.value);
+    }
+    emit('close');
+};
+
 const onInput = (e) => {
     emit('update:modelValue', e.target.value);
     emit('save', e.target.value);
@@ -22,11 +44,11 @@ const onInput = (e) => {
 </script>
 
 <template>
-  <div id="full-screen-editor" v-show="visible" :class="{ 'anim-fade-in': visible }">
+  <div id="full-screen-editor" v-show="visible" :class="{ 'anim-fade-in': visible, 'keyboard-open': isKeyboardOpen }">
       <div class="fs-editor-body">
           <textarea id="fs-editor-textarea" :value="modelValue" @input="onInput"></textarea>
       </div>
-      <div id="fs-editor-close" style="display: none" @click="$emit('close')"></div>
+      <div id="fs-editor-close" style="display: none" @click="handleClose"></div>
   </div>
 </template>
 
@@ -56,6 +78,10 @@ body.dark-theme #full-screen-editor {
     display: flex;
     flex-direction: column;
     padding-top: calc(var(--header-height, 80px) + 10px);
+    padding-bottom: calc(20px + var(--sab));
+}
+
+#full-screen-editor.keyboard-open .fs-editor-body {
     padding-bottom: calc(20px + var(--sab) + var(--keyboard-overlap, 0px));
 }
 

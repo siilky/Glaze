@@ -12,6 +12,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
+import { getBlacklistedProvider } from '@/core/config/APISettings.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -27,12 +28,79 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-    'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit', 
-    'open-actions', 'open-avatar', 'delete', 'toggle-selection'
+    'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
+    'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
+    'save-guidance', 'regenerate-image'
 ]);
 
 const triggeredItemsSheet = ref(null);
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
+
+const isGuidedSwipeOpen = ref(false);
+const guidedSwipeText = ref('');
+const guidedSwipeInput = ref(null);
+
+const toggleGuidedSwipe = () => {
+    isGuidedSwipeOpen.value = !isGuidedSwipeOpen.value;
+    if (isGuidedSwipeOpen.value) {
+        nextTick(() => { if (guidedSwipeInput.value) guidedSwipeInput.value.focus(); });
+    } else {
+        guidedSwipeText.value = '';
+    }
+};
+
+const submitGuidedSwipe = () => {
+    emit('regenerate', 'guided', guidedSwipeText.value);
+    isGuidedSwipeOpen.value = false;
+    guidedSwipeText.value = '';
+};
+
+const isGuidanceEditing = ref(false);
+const guidanceEditText = ref('');
+
+const startGuidanceEdit = () => {
+    guidanceEditText.value = currentGuidance.value?.text || '';
+    isGuidanceEditing.value = true;
+};
+
+const cancelGuidanceEdit = () => {
+    isGuidanceEditing.value = false;
+};
+
+const saveGuidanceEdit = () => {
+    emit('save-guidance', guidanceEditText.value.trim() || null);
+    isGuidanceEditing.value = false;
+};
+
+const currentGuidance = computed(() => {
+    // If it's a character message, ONLY show if it's explicitly a SWIPE
+    if (props.message.role === 'char') {
+        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
+        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
+            return {
+                text: meta.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        // Fallback for typing/initial swipe state
+        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
+            return {
+                text: props.message.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        return null; // Don't show redundant headers for GENERATION or IMPERSONATION on bot side
+    }
+
+    // User message: Show if it has any guidance
+    if (props.message.role === 'user' && props.message.guidanceText) {
+        return {
+            text: props.message.guidanceText,
+            type: props.message.guidanceType || 'GENERATION'
+        };
+    }
+    return null;
+});
 
 // --- Helpers ---
 const getAvatar = () => {
@@ -239,7 +307,7 @@ function handleTouchEnd(e) {
     if (deltaX < -100) {
         if ((props.message.swipeId || 0) < (props.message.swipes?.length || 1) - 1) {
             animateChange(() => emit('swipe', 1));
-        } else if (props.isLast && !disableSwipeRegeneration) {
+        } else if (props.isLast && !disableSwipeRegeneration.value) {
             body.style.transition = 'transform 0.1s';
             body.style.transform = `translateX(-20px)`;
             setTimeout(() => { 
@@ -333,6 +401,77 @@ const copyErrorText = (text) => {
     const cleanText = div.textContent || div.innerText || text;
     copyText(cleanText.trim());
 };
+
+const openImage = (src, instruction = null) => {
+    if (!src) return;
+    window.dispatchEvent(new CustomEvent('trigger-open-image', {
+        detail: { src, name: 'Attachment', description: instruction?.prompt || '' }
+    }));
+};
+
+const parseIIGInstruction = (el) => {
+    if (!el?.dataset?.iigInstruction) return null;
+    try {
+        return JSON.parse(el.dataset.iigInstruction
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+    } catch { return null; }
+};
+
+const handleContentClick = (e) => {
+    const path = e.composedPath();
+
+    // Loading block — tap to expand/collapse prompt text
+    const loadingBlock = path.find(el => el?.classList?.contains('imggen-loading'));
+    if (loadingBlock) {
+        e.stopPropagation();
+        loadingBlock.classList.toggle('expanded');
+        return;
+    }
+
+    // Options button on generated image → bottom sheet with 3 actions
+    const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
+    if (optionsBtn) {
+        e.stopPropagation();
+        const wrapper = path.find(el => el?.classList?.contains('imggen-result-wrapper'));
+        const img = wrapper?.querySelector?.('img.imggen-result');
+        if (!img) return;
+        const instr = parseIIGInstruction(img);
+        const id = img.dataset?.iigId;
+        const src = img.src;
+        showBottomSheet({
+            items: [
+                {
+                    label: t('imggen_expand_image') || 'Expand image',
+                    hint: t('imggen_expand_image_hint') || 'Открыть картинку в полноэкранном режиме и посмотреть промпт',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
+                    onClick: () => { closeBottomSheet(); openImage(src, instr); }
+                },
+                {
+                    label: t('action_regenerate') || 'Regenerate',
+                    hint: t('imggen_regenerate_hint') || 'Повторно сгенерировать картинку',
+                    icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
+                    onClick: () => { closeBottomSheet(); if (instr && id) emit('regenerate-image', { instruction: instr, id }); }
+                },
+            ]
+        });
+        return;
+    }
+
+    // Error retry button
+    const retryBtn = path.find(el => el?.classList?.contains('imggen-error-retry'));
+    if (retryBtn) {
+        e.stopPropagation();
+        const errorBlock = path.find(el => el?.classList?.contains('imggen-error'));
+        if (errorBlock) {
+            const instr = parseIIGInstruction(errorBlock);
+            const id = errorBlock.dataset?.iigId;
+            if (instr && id) emit('regenerate-image', { instruction: instr, id });
+        }
+        return;
+    }
+
+    handleBubbleClick(e);
+};
 const layoutMode = computed(() => themeState.chatLayout);
 const showFooter = computed(() => {
     // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
@@ -346,18 +485,25 @@ const showFooter = computed(() => {
     return true; // Always show in other layouts for meta/actions
 });
 
+const blacklistedErrorProvider = computed(() => {
+    if (!props.message.isError) return null;
+    const endpoint = localStorage.getItem('gz_api_endpoint_normalized')
+        || localStorage.getItem('api-endpoint') || '';
+    return getBlacklistedProvider(endpoint);
+});
+
 const tokenCount = computed(() => {
     return props.message.tokens || 0;
 });
 
-const uiHideMsgId = ref(hideMessageId);
-const uiHideGenTime = ref(hideGenerationTime);
-const uiHideTokenCnt = ref(hideTokenCount);
+const uiHideMsgId = ref(hideMessageId.value);
+const uiHideGenTime = ref(hideGenerationTime.value);
+const uiHideTokenCnt = ref(hideTokenCount.value);
 
 const onSettingsChanged = () => {
-    uiHideMsgId.value = hideMessageId;
-    uiHideGenTime.value = hideGenerationTime;
-    uiHideTokenCnt.value = hideTokenCount;
+    uiHideMsgId.value = hideMessageId.value;
+    uiHideGenTime.value = hideGenerationTime.value;
+    uiHideTokenCnt.value = hideTokenCount.value;
 };
 
 onMounted(() => {
@@ -399,6 +545,39 @@ onUnmounted(() => {
             </span>
         </div>
 
+        <!-- Guidance Block (Header) -->
+        <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 4px; border-radius: 8px;">
+            <div class="guidance-label" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>GUIDED {{ currentGuidance.type }}</span>
+                <div style="display: flex; gap: 2px; align-items: center;">
+                    <div class="edit-btn inline-pencil" v-if="!isGuidanceEditing && !message.isEditing && !isGenerating" title="Edit instruction" @click.stop="startGuidanceEdit" style="width: 20px; height: 20px; background: transparent; border: none; box-shadow: none;">
+                        <svg viewBox="0 0 24 24" style="width: 13px; height: 13px; fill: currentColor; opacity: 0.6;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                    </div>
+                    <div class="edit-btn inline-refresh" v-if="!isGenerating && message.role === 'char'" title="Regenerate swipe with this instruction" @click.stop="emit('regenerate', 'guided', currentGuidance.text)" style="width: 20px; height: 20px; background: transparent; border: none; box-shadow: none;">
+                        <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: currentColor; opacity: 0.6;"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div v-if="isGuidanceEditing" class="guidance-edit-container-inline">
+                <textarea 
+                    v-model="guidanceEditText" 
+                    class="edit-textarea guidance-edit-textarea" 
+                    style="font-style: italic; font-size: 13px; background: rgba(0,0,0,0.03); margin-bottom: 6px;"
+                    rows="1" 
+                    @vue:mounted="({ el }) => focusAndResize(el)"
+                ></textarea>
+                <div class="edit-buttons" style="display: flex; gap: 8px; justify-content: flex-end;">
+                    <div class="edit-btn cancel" title="Cancel" @click.stop="cancelGuidanceEdit" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                    </div>
+                    <div class="edit-btn save" title="Save" @click.stop="saveGuidanceEdit" style="width: 24px; height: 24px;">
+                        <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div v-else class="guidance-content">{{ currentGuidance.text }}</div>
+        </div>
+
         <!-- Reasoning Block -->
         <div v-if="message.reasoning" class="msg-reasoning collapsed">
             <div class="msg-reasoning-header" @click="$event.target.closest('.msg-reasoning').classList.toggle('collapsed')">
@@ -436,19 +615,30 @@ onUnmounted(() => {
                     class="msg-body" 
                     v-else-if="message.text || (!message.isTyping && !message.text)" 
                     :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)"
-                    @click="handleBubbleClick"
+                    @click="handleContentClick"
                 >
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">
                             <span>ERROR</span>
+                            <span v-if="blacklistedErrorProvider" class="error-provider-chip">{{ blacklistedErrorProvider.name }} API</span>
                             <div class="error-copy-btn" @click.stop="copyErrorText(message.text)">
                                 <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
                             </div>
                         </div>
                         <ShadowContent class="error-content" :html="formatMessageText(message.text)" :is-selected="isSelected" />
                     </div>
-                    <ShadowContent v-else :html="combinedMessageData.html" :is-selected="isSelected" />
+                    <template v-else>
+                        <ShadowContent :html="combinedMessageData.html" :is-selected="isSelected" />
+                    </template>
                     
+                    <div v-if="message.image" class="msg-image-attachment" :class="{ 'image-hidden': message.imageHidden }">
+                        <img :src="message.image" alt="Attached image" @click.stop="openImage(message.image)" />
+                        <div class="image-ctx-toggle" @click.stop="emit('toggle-image-hidden')" :title="message.imageHidden ? 'Include image in context' : 'Exclude image from context'">
+                            <svg v-if="message.imageHidden" viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>
+                            <svg v-else viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                        </div>
+                    </div>
+
                     <div v-if="layoutMode === 'bubble'" class="bubble-meta">
                         <span class="msg-index gen-stat" v-if="!uiHideMsgId">#{{ index + 1 }}</span>
                         
@@ -554,6 +744,10 @@ onUnmounted(() => {
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
 
+                <div class="msg-guided-swipe-btn" v-if="message.role === 'char' && !isGenerating && !message.isEditing && isLast" :class="{ 'active': isGuidedSwipeOpen }" @click.stop="toggleGuidedSwipe" :title="t('guided_swipe') || 'Guided Swipe'">
+                    <svg viewBox="0 0 24 24"><path d="M9 5v2h6.59L4 18.59 5.41 20 17 8.41V15h2V5H9z"/></svg>
+                </div>
+
                 <!-- Regenerate Button (User or Error) -->
                 <div class="msg-regenerate" v-if="((message.role === 'user' && isLast) || message.isError) && !isGenerating && !message.isEditing" @click.stop="emit('regenerate', 'magic')" :class="{'icon-only': (message.role === 'char' && ((message.swipes && message.swipes.length > 1) || (index === 0 && getAllGreetings(activeChatChar).length > 1)))}">
                     <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
@@ -576,6 +770,27 @@ onUnmounted(() => {
                 <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
             </div>
 
+        </div>
+
+        <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
+            <div class="guidance-main">
+                <div class="guidance-header">{{ t('guided_swipe') || 'GUIDED SWIPE' }}</div>
+                <textarea 
+                    class="guided-swipe-textarea"
+                    v-model="guidedSwipeText"
+                    :placeholder="t('guided_swipe_placeholder') || 'Enter OOC instruction for swipe...'"
+                    rows="1"
+                    ref="guidedSwipeInput"
+                ></textarea>
+            </div>
+            <div class="guided-swipe-actions">
+                <div class="guided-btn cancel" @click.stop="toggleGuidedSwipe">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </div>
+                <div class="guided-btn confirm" @click.stop="submitGuidedSwipe">
+                    <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -612,6 +827,50 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.msg-image-attachment {
+    margin-top: 8px;
+    border-radius: 12px;
+    overflow: hidden;
+    max-width: 100%;
+    position: relative;
+    display: inline-block;
+}
+.msg-image-attachment img {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 12px;
+    display: block;
+    object-fit: cover;
+    transition: opacity 0.25s;
+    cursor: pointer;
+}
+.msg-image-attachment.image-hidden img {
+    opacity: 0.35;
+}
+.image-ctx-toggle {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.2s;
+    z-index: 2;
+}
+.image-ctx-toggle:active {
+    background: rgba(0,0,0,0.75);
+}
+.image-ctx-toggle svg {
+    width: 16px;
+    height: 16px;
+    fill: #fff;
+}
+
 .message-section {
     padding: 12px 16px;
     display: flex;
@@ -893,6 +1152,28 @@ onUnmounted(() => {
 }
 .msg-regenerate svg { width: 14px; height: 14px; fill: currentColor; }
 
+.msg-guided-swipe-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 12px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border-radius: 12px;
+    padding: 2px 6px;
+    color: var(--text-gray);
+    height: 22px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.msg-guided-swipe-btn.active {
+    background-color: var(--vk-blue);
+    color: white;
+    border-color: var(--vk-blue);
+}
+.msg-guided-swipe-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
 .msg-actions-btn {
     justify-self: end;
     padding: 4px;
@@ -983,7 +1264,7 @@ onUnmounted(() => {
     display: flex; 
     justify-self: end; 
     gap: 8px; 
-    grid-column: 2 / 4; 
+    grid-column: 3; 
 }
 .edit-btn { 
     width: 28px; 
@@ -1006,6 +1287,77 @@ onUnmounted(() => {
 .edit-btn svg { width: 16px; height: 16px; }
 .edit-btn.save svg { fill: #4CAF50; }
 .edit-btn.cancel svg { fill: #ff4444; }
+
+/* Guided Swipe Inline Block */
+.guided-swipe-container {
+    margin-top: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.9));
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    border-radius: 28px !important;
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    animation: slideDownFade 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.guidance-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.guidance-header {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+}
+
+.guided-swipe-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-black);
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    field-sizing: content;
+    padding: 4px 0;
+    max-height: 120px;
+    min-height: 20px;
+}
+.guided-swipe-textarea::-webkit-scrollbar { display: none; }
+.guided-swipe-textarea { -ms-overflow-style: none; scrollbar-width: none; }
+.guided-swipe-textarea::placeholder { color: var(--text-gray); }
+
+.guided-swipe-actions {
+    display: flex;
+    gap: 8px;
+}
+.guided-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
+    background-color: rgba(0, 0, 0, 0.03);
+    transition: all 0.2s ease;
+}
+.guided-btn:active { transform: scale(0.9); background-color: rgba(0, 0, 0, 0.1); }
+.guided-btn.confirm { color: #4CAF50; }
+.guided-btn.cancel { color: #ff4444; }
+.guided-btn svg { width: 16px; height: 16px; fill: currentColor; }
+:global(body.dark-theme) .guided-swipe-textarea { color: #fff; }
 
 /* Dark Theme */
 :global(body.dark-theme) .msg-body { color: var(--current-text-color, #e1e3e6); }
@@ -1119,6 +1471,30 @@ body.dark-theme .error-header {
 
 body.dark-theme .error-content {
     color: #ffb3b3;
+}
+
+.error-provider-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
+    margin-right: 8px;
+    background-color: rgba(255, 59, 48, 0.12);
+    color: #ff3b30;
+    border: 1px solid rgba(255, 59, 48, 0.25);
+}
+
+body.dark-theme .error-provider-chip {
+    background-color: rgba(255, 59, 48, 0.2);
+    color: #ff453a;
+    border-color: rgba(255, 59, 48, 0.35);
 }
 
 :global(body.dark-theme) .message-section.error .msg-name {
@@ -1288,5 +1664,35 @@ body.dark-theme .error-content {
     opacity: 0.45;
 }
 
-
+/* Guidance Block Styling */
+.msg-guidance-block {
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--vk-blue);
+    background: rgba(var(--vk-blue-rgb), 0.05);
+    border-radius: 4px;
+    font-size: 13px;
+    width: fit-content;
+    max-width: 100%;
+}
+.guidance-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--vk-blue);
+    margin-bottom: 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+.guidance-content {
+    color: var(--text-dark-gray);
+    line-height: 1.4;
+    font-size: 12px;
+    font-style: italic;
+}
+:global(body.dark-theme) .msg-guidance-block {
+    background: rgba(var(--vk-blue-rgb), 0.1);
+}
+:global(body.dark-theme) .guidance-content {
+    color: #ccc;
+}
 </style>

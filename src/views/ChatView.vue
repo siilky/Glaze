@@ -13,6 +13,7 @@ function genMsgId() {
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted, watch, computed, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatText, cleanText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
@@ -43,7 +44,13 @@ import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 import LorebookSheet from '@/components/sheets/LorebookSheet.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import StatsSheet from '@/components/sheets/StatsSheet.vue';
+import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
+import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
+import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
+import { showToast } from '@/core/states/toastState.js';
+
+const isAndroid = Capacitor.getPlatform() === 'android';
 
 // --- Component State ---
 const chatViewRoot = ref(null);
@@ -61,6 +68,10 @@ let inputResizeObserver = null;
 const cutoffIndex = ref(-1);
 const apiView = ref(null);
 const statsSheet = ref(null);
+const imageGenSheet = ref(null);
+const openImageGenSheet = () => imageGenSheet.value?.open();
+const glossarySheet = ref(null);
+const openGlossarySheet = () => glossarySheet.value?.open();
 const presetView = ref(null);
 const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
@@ -72,6 +83,7 @@ let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
 let cutoffRerunTimer = null;
+const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
 let ignoreScrollAdjustmentTimer = null;
@@ -204,7 +216,7 @@ const onScroll = (e) => {
 window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 
 // Helper to access translations
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {
@@ -438,7 +450,37 @@ const onFsEditorClosed = async () => {
     }
 };
 
-async function openChat(char, onBack) {
+async function openChat(char, onBack, force = false) {
+    // Prevent reloading if the requested chat is already open and active
+    if (!force && activeChatChar && activeChatChar.id === char.id && (char.sessionId === undefined || activeChatChar.sessionId === char.sessionId) && !isOpeningChat) {
+        if (char.msgId) {
+            const msgIdx = currentMessages.value.findIndex(m => m.id === char.msgId);
+            if (msgIdx !== -1) {
+                const displayIndex = displayMessages.value.findIndex(
+                    m => m.type === 'message' && m.originalIndex === msgIdx
+                );
+                if (displayIndex !== -1) {
+                    scrollToAnchor({ index: displayIndex, offset: 0 });
+                    nextTick(() => {
+                        const el = document.getElementById(`msg-${msgIdx}`);
+                        if (el) {
+                            el.classList.add('search-highlight');
+                            setTimeout(() => el.classList.remove('search-highlight'), 2000);
+                        }
+                    });
+                }
+            }
+            delete char.msgId;
+        }
+        
+        if (onBack && currentOnBack !== onBack) {
+            currentOnBack = onBack;
+        }
+
+        clearMessageNotifications(char.id);
+        return;
+    }
+
     isOpeningChat = true;
     isLoading.value = true;
     
@@ -585,9 +627,13 @@ async function openChat(char, onBack) {
                 if (lastMsg.swipesMeta && lastMsg.swipesMeta[newSwipeId]) {
                     lastMsg.reasoning = lastMsg.swipesMeta[newSwipeId].reasoning;
                     lastMsg.genTime = lastMsg.swipesMeta[newSwipeId].genTime;
+                    lastMsg.guidanceText = lastMsg.swipesMeta[newSwipeId].guidanceText || null;
+                    lastMsg.guidanceType = lastMsg.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
                 } else {
                     lastMsg.reasoning = null;
                     lastMsg.genTime = null;
+                    lastMsg.guidanceText = null;
+                    lastMsg.guidanceType = 'GENERATION';
                 }
                 dirty = true;
                 break;
@@ -678,6 +724,7 @@ async function openChat(char, onBack) {
             }, 50);
             messagesContainer.value.addEventListener('scroll', onScroll);
             onScroll({ target: messagesContainer.value });
+            applyImageAutoHide();
         }
         // updateInputPreview(); // Handled by ChatInput component
 
@@ -841,26 +888,39 @@ function smartScroll() {
     }
 }
 
-async function sendMessage() {
+async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
         const state = generatingStates[activeChatChar.id];
         if (state) {
             if (state.controller) state.controller.abort();
             if (state.restoreState) state.restoreState();
-            
+
             if (state.type === 'impersonation') {
                 isImpersonating.value = false;
             }
 
             delete generatingStates[activeChatChar.id];
             isGenerating.value = false;
+        } else {
+            // Stale isGenerating flag — no active generation found, just reset
+            isGenerating.value = false;
         }
         return;
     }
 
+    let effectiveGuidance = guidanceText;
+    let effectiveGuidanceType = 'GENERATION';
+
+    if (!effectiveGuidance && pendingGuidance.value) {
+        effectiveGuidance = pendingGuidance.value.text;
+        effectiveGuidanceType = pendingGuidance.value.type;
+        pendingGuidance.value = null;
+    }
+
     const text = inputValue.value.trim();
-    if (text) {
+    const hasImage = typeof attachedImage === 'string';
+    if (text || hasImage || effectiveGuidance) {
 
         const now = new Date();
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -876,11 +936,13 @@ async function sendMessage() {
             role: 'user', 
             text: processedText, 
             time: time, 
-            timestamp: Date.now(), 
+            timestamp: now.getTime(),
+            image: attachedImage, 
             tokens: estimateTokens(processedText),
-            persona: { name: persona.name, id: persona.id } 
+            persona: { ...activePersona.value },
+            guidanceText: effectiveGuidance,
+            guidanceType: effectiveGuidanceType
         };
-        
         currentMessages.value.push(msgData);
         if (activeChatChar) {
             const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
@@ -901,14 +963,14 @@ async function sendMessage() {
         });
         
         if (activeChatChar) {
-            startGeneration(activeChatChar, null);
+            startGeneration(activeChatChar, null, -1, null, effectiveGuidance, effectiveGuidanceType);
         }
     }
 }
 
 // --- Generation Logic ---
 
-function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
+function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guidanceText = null, guidanceType = 'GENERATION') {
     // Check API Configuration
     const model = localStorage.getItem('api-model');
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
@@ -996,7 +1058,9 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             timestamp: Date.now(),
             swipes: [""],
             swipeId: 0,
-            isTyping: true // Custom flag for UI
+            isTyping: true, // Custom flag for UI
+            guidanceText,
+            guidanceType
         };
         currentMessages.value.push(msg);
         msgIndex = currentMessages.value.length - 1;
@@ -1009,6 +1073,16 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }
 
     // Get unique ID to identify message across re-mounts
+    if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
+        const msg = currentMessages.value[msgIndex];
+        msg.guidanceText = guidanceText;
+        msg.guidanceType = guidanceType;
+        // Force fallback to message-level guidance by clearing current swipe's metadata if it exists
+        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
+            msg.swipesMeta[msg.swipeId || 0].guidanceText = null;
+            msg.swipesMeta[msg.swipeId || 0].guidanceType = null;
+        }
+    }
     const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
 
     // Save generation status for DialogList
@@ -1052,6 +1126,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }, 100);
 
     const restoreState = async (isError = false) => {
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
         if (generatingStates[char.id]?.timerId) clearInterval(generatingStates[char.id].timerId);
         localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
         
@@ -1072,6 +1147,16 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                     
                     msg.swipeId = newSwipeId;
                     msg.text = msg.swipes[newSwipeId] || "";
+                    
+                    // Restore guidance from the reverted swipe's meta
+                    if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
+                        msg.guidanceText = msg.swipesMeta[newSwipeId].guidanceText || null;
+                        msg.guidanceType = msg.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
+                    } else {
+                        msg.guidanceText = null;
+                        msg.guidanceType = 'GENERATION';
+                    }
+                    
                     if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
                         msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
                         msg.genTime = msg.swipesMeta[newSwipeId].genTime;
@@ -1119,6 +1204,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     const onError = async (e) => {
         const state = generatingStates[char.id];
         if (!state || state.genId !== genId) return;
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
         // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
         if (e.message === "Context limit exceeded") {
@@ -1177,6 +1263,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             role: m.role === 'user' ? 'user' : 'assistant', 
             content: m.text || "", 
             text: m.text || "", 
+            image: (m.image && !m.imageHidden) ? m.image : null,
             chatId: m.originalIndex 
         }));
 
@@ -1219,6 +1306,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
         history,
         authorsNote,
         summary,
+        guidanceText,
         type: 'normal',
         controller,
         callbacks: {
@@ -1245,9 +1333,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                 }
             },
             onUpdate,
-            onComplete: async (response, finalReasoning) => {
+            onComplete: async (response, finalReasoning, meta) => {
         const currentState = generatingStates[char.id];
         if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
         localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
 
         if (!currentState || currentState.genId !== genId) return;
@@ -1287,7 +1376,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             msg.genTime = duration;
             msg.tokens = estimateTokens(response);
             msg.isTyping = false;
-            
+            if (meta?.partialError) {
+                msg.isPartial = true;
+                msg.partialErrorMsg = meta.partialError;
+            }
+
             // Update swipes
             if (!msg.swipes) msg.swipes = [];
             if (!msg.swipesMeta) msg.swipesMeta = [];
@@ -1295,7 +1388,13 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
             // If this was a new generation (not a swipe add), it's the first swipe
             if (msg.swipes.length === 1 && msg.swipes[0] === "") {
                 msg.swipes[0] = response;
-                msg.swipesMeta[0] = { genTime: duration, reasoning: finalReasoning, tokens: msg.tokens };
+                msg.swipesMeta[0] = { 
+                    genTime: duration, 
+                    reasoning: finalReasoning, 
+                    tokens: msg.tokens,
+                    guidanceText: msg.guidanceText,
+                    guidanceType: msg.guidanceType
+                };
                 addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
             } else {
                 msg.swipes[msg.swipeId || 0] = response;
@@ -1303,11 +1402,26 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                 msg.swipesMeta[msg.swipeId || 0].genTime = duration;
                 msg.swipesMeta[msg.swipeId || 0].reasoning = finalReasoning;
                 msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
+                msg.swipesMeta[msg.swipeId || 0].guidanceText = guidanceText;
+                msg.swipesMeta[msg.swipeId || 0].guidanceType = guidanceType;
                 addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
             }
             
             updateSessionMessage(char, foundIndex, msg);
-            
+
+            // Process image generation tags async (non-blocking)
+            processMessageImages(msg.text, (updatedText) => {
+                msg.text = updatedText;
+                msg.swipes[msg.swipeId || 0] = updatedText;
+                updateSessionMessage(char, foundIndex, msg);
+            }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
+                if (finalText !== msg.text) {
+                    msg.text = finalText;
+                    msg.swipes[msg.swipeId || 0] = finalText;
+                    updateSessionMessage(char, foundIndex, msg);
+                }
+            }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
+
             if (wasVisible) {
                 scrollToIndex(displayIndex, 'smooth', 'top');
             } else {
@@ -1331,7 +1445,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                     msg.genTime = duration;
                     msg.tokens = estimateTokens(response);
                     msg.isTyping = false;
-                    
+                    if (meta?.partialError) {
+                        msg.isPartial = true;
+                        msg.partialErrorMsg = meta.partialError;
+                    }
+
                     if (!msg.swipes) msg.swipes = [];
                     if (!msg.swipesMeta) msg.swipesMeta = [];
                     
@@ -1347,6 +1465,18 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
                         msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
                         addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
                     }
+                    
+                    processMessageImages(response, (updatedText) => {
+                        msg.text = updatedText;
+                        msg.swipes[msg.swipeId || 0] = updatedText;
+                        db.saveChat(char.id, bgData);
+                    }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
+                        if (finalText !== msg.text) {
+                            msg.text = finalText;
+                            msg.swipes[msg.swipeId || 0] = finalText;
+                            db.saveChat(char.id, bgData);
+                        }
+                    }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
                     
                     await db.saveChat(char.id, bgData);
                     sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
@@ -1370,7 +1500,39 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null) {
     }
 }
 
-function regenerateMessage(msgIndex, mode = 'normal') {
+async function handleImageRegenerate(msgIndex, { instruction, id }) {
+    const char = activeChatChar;
+    if (!char || !currentMessages.value[msgIndex]) return;
+    const msg = currentMessages.value[msgIndex];
+
+    const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const loadingHtml = makeLoadingHtml(instruction, id);
+    const toLoading = (text) => text
+        .replace(new RegExp(`<span[^>]+class="imggen-error"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
+        .replace(new RegExp(`<span[^>]+class="imggen-result-wrapper"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
+
+    msg.text = toLoading(msg.text);
+    msg.swipes[msg.swipeId || 0] = msg.text;
+    updateSessionMessage(char, msgIndex, msg);
+
+    const loadingRe = new RegExp(`<span[^>]+class="imggen-loading"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/span>`, 'g');
+    const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
+
+    try {
+        const dataUrl = await generateImage(instruction, context);
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeResultHtml(instruction, id, dataUrl));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
+    } catch (err) {
+        const latest = currentMessages.value[msgIndex]?.text || msg.text;
+        msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
+        msg.swipes[msg.swipeId || 0] = msg.text;
+        updateSessionMessage(char, msgIndex, msg);
+    }
+}
+
+function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
     if (msgIndex === -1) return;
     const msg = currentMessages.value[msgIndex];
     const isUser = msg.role === 'user';
@@ -1385,12 +1547,13 @@ function regenerateMessage(msgIndex, mode = 'normal') {
             msg.swipes[msg.swipeId || 0] = "";
         }
         updateSessionMessage(activeChatChar, msgIndex, msg);
-        startGeneration(activeChatChar, null, msgIndex);
+        startGeneration(activeChatChar, null, msgIndex, null, guidanceText, 'SWIPE');
         return;
     }
 
     if (mode === 'magic' && isUser) {
-        startGeneration(activeChatChar, null);
+        // Inherit guidance from the user message if it exists
+        startGeneration(activeChatChar, null, -1, null, msg.guidanceText, 'GENERATION');
         return;
     }
 
@@ -1398,7 +1561,7 @@ function regenerateMessage(msgIndex, mode = 'normal') {
         mode = 'new_variant';
     }
 
-    if (mode === 'new_variant' && !isUser) {
+    if ((mode === 'new_variant' || mode === 'guided') && !isUser) {
         // Add new swipe
         const newSwipeIndex = (msg.swipes?.length || 0);
         if (!msg.swipes) msg.swipes = [msg.text];
@@ -1408,7 +1571,15 @@ function regenerateMessage(msgIndex, mode = 'normal') {
         msg.reasoning = null;
         msg.isTyping = true;
         
-        startGeneration(activeChatChar, null, msgIndex);
+        let effectiveGuidance = null;
+        let effectiveType = 'GENERATION';
+        
+        if (mode === 'guided') {
+            effectiveGuidance = guidanceText;
+            effectiveType = 'SWIPE';
+        }
+        
+        startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
     } else {
         // Delete and regen (simplified for Vue: remove subsequent, then regen)
         // In Vue we just slice the array
@@ -1421,7 +1592,7 @@ function regenerateMessage(msgIndex, mode = 'normal') {
             }
         });
         
-        startGeneration(activeChatChar, null);
+        startGeneration(activeChatChar, null, -1, null, guidanceText, 'GENERATION');
     }
 }
 
@@ -1470,7 +1641,7 @@ async function branchSession(msgIndex) {
     // Reload UI
     const charObj = { ...activeChatChar };
     delete charObj.sessionId;
-    await openChat(charObj);
+    await openChat(charObj, null, true);
 }
 
 // --- Message Actions ---
@@ -1775,9 +1946,34 @@ function cancelEdit(msg) {
     delete msg.editText;
 }
 
+function saveGuidance(msg, index, newGuidance) {
+    if (msg.role === 'char') {
+        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0] && msg.swipesMeta[msg.swipeId || 0].guidanceType === 'SWIPE') {
+            msg.swipesMeta[msg.swipeId || 0].guidanceText = newGuidance;
+        }
+        if (msg.guidanceType === 'SWIPE') {
+            msg.guidanceText = newGuidance;
+        }
+    } else if (msg.role === 'user') {
+        msg.guidanceText = newGuidance;
+    }
+    updateSessionMessage(activeChatChar, index, msg);
+}
+
+function toggleImageHidden(msg, index) {
+    msg.imageHidden = !msg.imageHidden;
+    updateSessionMessage(activeChatChar, index, msg);
+    showToast(msg.imageHidden ? 'Изображение скрыто из контекста' : 'Изображение добавлено в контекст');
+}
+
 // --- Magic Menu ---
 
-async function startImpersonation() {
+async function startImpersonation(guidanceText = null) {
+    if (guidanceText) {
+        pendingGuidance.value = { text: guidanceText, type: 'IMPERSONATION' };
+    } else {
+        pendingGuidance.value = null;
+    }
     if (!activeChatChar) return;
     const charId = activeChatChar.id;
     
@@ -1820,13 +2016,16 @@ async function startImpersonation() {
     // Prepare history
     const history = currentMessages.value
         .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping)
+        .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
+
+    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
 
     generateChatResponse({
         text: promptText,
         char: activeChatChar,
         history,
+        guidanceText,
         type: 'impersonation',
         controller,
         callbacks: {
@@ -1883,7 +2082,7 @@ function openAvatar(msg) {
     const src = getAvatar(msg);
     if (src) {
         const name = getDisplayName(msg);
-        const description = (msg.role === 'char' && activeChatChar) ? (activeChatChar.description || "") : "";
+        const description = "";
         window.dispatchEvent(new CustomEvent('trigger-open-image', { 
             detail: { src, name, description, onCloseCallback: null } 
         }));
@@ -1937,7 +2136,8 @@ async function deleteSession(sessionId, targetChar) {
         await loadChats(); // Reload local state
         
         if (activeChatChar && activeChatChar.id === char.id) {
-            const currentData = await getChatData(char.id);
+            // Fetch raw DB state to bypass getChat's auto-creation
+            const currentData = await db.get(`gz_chat_${char.id}`);
             // Check if there are any sessions left
             if (!currentData || !currentData.sessions || Object.keys(currentData.sessions).length === 0) {
                 // No sessions left, close chat manually to avoid creating a new empty one
@@ -1958,7 +2158,7 @@ async function deleteSession(sessionId, targetChar) {
                 // Reload chat
                 const charObj = { ...activeChatChar };
                 delete charObj.sessionId; // Ensure we load the new currentId
-                openChat(charObj);
+                openChat(charObj, null, true);
             }
         }
         
@@ -1999,9 +2199,7 @@ async function openSessionsSheet(char) {
                     await dbSwitchSession(char.id, sid);
                     await loadChats();
                     // Pass char without sessionId so openChat uses the currentId from DB
-                    const charObj = { ...char };
-                    delete charObj.sessionId;
-                    openChat(charObj);
+                    openChat({ ...char, sessionId: sid }, null, true);
                 }
                 closeBottomSheet();
             },
@@ -2018,7 +2216,8 @@ async function openSessionsSheet(char) {
     });
 
     showBottomSheet({
-        title: t('history_title'),
+        title: t('history_title') + ' ',
+        helpTip: 'sessions',
         cardItems: cardItems,
         headerAction: {
             icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
@@ -2026,7 +2225,8 @@ async function openSessionsSheet(char) {
                 closeBottomSheet();
                 setTimeout(() => {
                     showBottomSheet({
-                        title: t('history_title') || 'Sessions',
+                        title: t('history_title') + ' ',
+                        helpTip: 'sessions',
                         items: [
                             {
                                 label: t('action_create_new') || 'Create New',
@@ -2045,7 +2245,7 @@ async function openSessionsSheet(char) {
                                         await loadChats();
                                         const charObj = { ...char };
                                         delete charObj.sessionId;
-                                        openChat(charObj);
+                                        openChat(charObj, null, true);
                                     });
                                 }
                             }
@@ -2066,10 +2266,15 @@ function openDeleteSessionConfirm(char, sessionId, returnToSessions = false) {
                 icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
                 iconColor: '#ff4444',
                 isDestructive: true,
-                onClick: () => {
-                    deleteSession(sessionId, char);
+                onClick: async () => {
+                    await deleteSession(sessionId, char);
                     closeBottomSheet();
-                    if (returnToSessions) setTimeout(() => openSessionsSheet(char), 300);
+                    if (returnToSessions) {
+                        const currentData = await db.get(`gz_chat_${char.id}`);
+                        if (currentData && currentData.sessions && Object.keys(currentData.sessions).length > 0) {
+                            setTimeout(() => openSessionsSheet(char), 300);
+                        }
+                    }
                 }
             },
             {
@@ -2092,7 +2297,7 @@ async function createNewSession(char) {
     // Open chat with the new currentId (by removing sessionId from char object)
     const charObj = { ...char };
     delete charObj.sessionId;
-    openChat(charObj);
+    openChat(charObj, null, true);
 }
 
 async function openCharCard() {
@@ -2135,6 +2340,38 @@ function openRegexSheet() {
     regexSheet.value?.open();
 }
 
+const applyImageAutoHide = () => {
+    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    
+    if (!autoHide || threshold <= 0 || !activeChatChar) return;
+
+    let changed = false;
+    let assistantCount = 0;
+    
+    // Iterate backwards to count assistant responses after user images
+    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
+        const msg = currentMessages.value[i];
+        if (msg.role === 'char' || msg.role === 'assistant') {
+            assistantCount++;
+        } else if (msg.role === 'user' && msg.image) {
+            if (assistantCount >= threshold && !msg.imageHidden) {
+                msg.imageHidden = true;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        getChatData(activeChatChar.id).then(data => {
+            if (data) {
+                data.sessions[data.currentId] = currentMessages.value;
+                db.saveChat(activeChatChar.id, data);
+            }
+        });
+    }
+};
+
 const restoreHeader = () => {
     if (activeChatChar) setupHeader(activeChatChar);
 };
@@ -2153,6 +2390,7 @@ const onGenerationEnded = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.charId) {
         isGenerating.value = false;
         isImpersonating.value = false;
+        applyImageAutoHide();
         updateContextCutoff();
     }
 };
@@ -2171,10 +2409,19 @@ const onVisibilityChange = () => {
     }
 };
 
+let _paddingRafContext = null;
 const updateContentPadding = () => {
-    if (messagesContainer.value && chatInputContainer.value) {
+    if (_paddingRafContext) cancelAnimationFrame(_paddingRafContext);
+    _paddingRafContext = requestAnimationFrame(() => {
+        _paddingRafContext = null;
+        if (messagesContainer.value && chatInputContainer.value) {
         const el = messagesContainer.value;
         const currentFullHeight = chatInputContainer.value.getBoundingClientRect().height;
+        const currentContainerHeight = el.getBoundingClientRect().height;
+        
+        const prevContainerHeight = el._lastContainerHeight !== undefined ? el._lastContainerHeight : currentContainerHeight;
+        el._lastContainerHeight = currentContainerHeight;
+        const containerHeightDiff = currentContainerHeight - prevContainerHeight;
         
         const prevFullHeight = el._lastFullHeight !== undefined ? el._lastFullHeight : currentFullHeight;
         el._lastFullHeight = currentFullHeight;
@@ -2185,7 +2432,7 @@ const updateContentPadding = () => {
         const currentPadding = parseFloat(el.style.paddingBottom) || 0;
         const paddingDiff = targetPadding - currentPadding;
 
-        if (Math.abs(diffScroll) < 0.1 && Math.abs(paddingDiff) < 0.1) return;
+        if (Math.abs(diffScroll) < 0.1 && Math.abs(paddingDiff) < 0.1 && Math.abs(containerHeightDiff) < 0.1) return;
 
         const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 5;
 
@@ -2198,14 +2445,17 @@ const updateContentPadding = () => {
         el._scrollUnlockTimer = setTimeout(() => {
             isProgrammaticScrolling.value = false;
         }, 100);
+        
+        const totalScrollAdjustment = diffScroll - containerHeightDiff;
 
         if (isAtBottom) {
             // If already at the bottom, stay at the bottom
             el.scrollTop = el.scrollHeight - el.clientHeight;
-        } else if (!ignoreScrollAdjustment && Math.abs(diffScroll) > 0.1) {
-            el.scrollTop += diffScroll;
+        } else if (!ignoreScrollAdjustment && Math.abs(totalScrollAdjustment) > 0.1) {
+            el.scrollTop += totalScrollAdjustment;
         }
-    }
+        }
+    });
 };
 
 function setScrollLock(enabled) {
@@ -2220,6 +2470,7 @@ function setScrollLock(enabled) {
 // during rapid keyboard show/hide cycles (which can crash WKWebView).
 let _vpRafId = null;
 function handleVisualViewport() {
+    if (Capacitor.getPlatform() !== 'ios') return;
     if (_vpRafId) return;
     _vpRafId = requestAnimationFrame(() => {
         _vpRafId = null;
@@ -2251,6 +2502,7 @@ onMounted(() => {
     if (chatInputContainer.value) {
         inputResizeObserver = new ResizeObserver(updateContentPadding);
         inputResizeObserver.observe(chatInputContainer.value);
+        if (messagesContainer.value) inputResizeObserver.observe(messagesContainer.value);
         updateContentPadding();
     }
     updateContextCutoff();
@@ -2373,12 +2625,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div id="view-chat" ref="chatViewRoot">
+    <div id="view-chat" ref="chatViewRoot" :class="{ 'android-resize-fix': isAndroid }">
         <div v-if="isLoading" class="chat-loading-overlay">
             <div class="app-loader-spinner"></div>
         </div>
 
-        <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }">
+        <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }" :style="isAndroid ? { marginBottom: keyboardOverlap + 'px' } : {}">
             <!-- paddingTop - spacer for virtual list scroll offset -->
             <div :style="{ height: paddingTop + 'px' }"></div>
             
@@ -2405,13 +2657,16 @@ onUnmounted(() => {
                     :is-selected="selectedMessages.has(vItem.item.data.timestamp)"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
-                    @regenerate="(mode) => regenerateMessage(vItem.item.originalIndex, mode)"
+                    @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
                     @edit="() => { vItem.item.data.editText = vItem.item.data.text; vItem.item.data.isEditing = true; }"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
+                    @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
                     @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
+                    @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
+                    @regenerate-image="(payload) => handleImageRegenerate(vItem.item.originalIndex, payload)"
                 />
             </template>
             <!-- paddingBottom - spacer for virtual list scroll offset -->
@@ -2421,7 +2676,7 @@ onUnmounted(() => {
         <div class="chat-status-gradient"></div>
 
 
-        <div class="chat-input-wrapper" ref="chatInputContainer">
+        <div class="chat-input-wrapper" ref="chatInputContainer" :style="isAndroid ? { bottom: keyboardOverlap + 'px' } : {}">
             <ChatInput 
                 ref="chatInputRef"
                 v-model="inputValue"
@@ -2448,6 +2703,8 @@ onUnmounted(() => {
                 @magic-presets="openPresetView"
                 @magic-lorebooks="openLorebookSheet"
                 @magic-regex="openRegexSheet"
+                @magic-image-gen="openImageGenSheet"
+                @magic-glossary="openGlossarySheet"
                 @delete-selected="deleteSelectedMessages"
                 @hide-selected="toggleHideSelectedMessages"
                 @cancel-selection="clearSelection"
@@ -2462,6 +2719,8 @@ onUnmounted(() => {
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
         <StatsSheet ref="statsSheet" />
+        <ImageGenSheet ref="imageGenSheet" />
+        <GlossarySheet ref="glossarySheet" />
     </div>
 </template>
 
@@ -3017,6 +3276,17 @@ body.dark-theme .message-section {
 .clock-flip-leave-to {
     transform: translateY(15px);
     opacity: 0;
+}
+
+/* Android text selection fix */
+#view-chat.android-resize-fix .chat-container {
+    transition: margin-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#view-chat.android-resize-fix .chat-input-wrapper {
+    transition: bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+#view-chat.android-resize-fix .chat-input-container.keyboard-open .chat-input-content {
+    padding-bottom: 0 !important;
 }
 </style>
 

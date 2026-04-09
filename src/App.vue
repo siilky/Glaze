@@ -19,15 +19,15 @@ const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors
 
 const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
+import AppToast from '@/components/ui/AppToast.vue';
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
-import { Keyboard } from '@capacitor/keyboard';
+const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
+const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
+const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 import { Capacitor } from '@capacitor/core';
-
-
-
-// Imports from script.js
+import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings } from '@/core/config/APISettings.js';
 import { initTheme, themeState } from '@/core/states/themeState.js';
 import { updateLanguage } from '@/utils/i18n.js';
@@ -44,7 +44,7 @@ import { initLorebookState } from '@/core/states/lorebookState.js';
 import { initPresetState } from '@/core/states/presetState.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 // Initialize error handling
 
 // --- Navigation state ---
@@ -59,6 +59,7 @@ const characterListRef = ref(null);
 const chatViewRef = ref(null);
 const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
+const backupSheetRef = ref(null);
 const presetViewRef = ref(null);
 
 const isHeaderEditorMode = ref(false);
@@ -90,7 +91,6 @@ const shouldOpenPersonasOnReturn = ref(false);
 
 const isDeleting = ref(false); // Guard flag to prevent auto-save during deletion
 const isOnboarding = ref(false);
-const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
 let kbListeners = [];
 
 // --- Categories ---
@@ -368,7 +368,7 @@ watch(fsEditorVisible, (val) => {
     if (val) {
         window.dispatchEvent(new CustomEvent('header-setup-editor', {
             detail: {
-                title: translations[currentLang]?.header_editor || 'Editor',
+                title: translations[currentLang.value]?.header_editor || 'Editor',
                 onBack: () => { fsEditorVisible.value = false; },
                 actions: [{
                     icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
@@ -423,12 +423,12 @@ const personaEditorConfig = [
 const fabConfig = computed(() => {
     if (currentView.value === 'view-dialogs') {
         return {
-            text: translations[currentLang]?.btn_new_chat || 'New Chat',
+            text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
             action: () => dialogListRef.value?.openNewChatPicker()
         };
     } else if (currentView.value === 'view-characters') {
         return {
-            text: translations[currentLang]?.btn_add || 'Add',
+            text: translations[currentLang.value]?.btn_add || 'Add',
             action: () => characterListRef.value?.onAddCharacter()
         };
     }
@@ -455,6 +455,85 @@ const updateLayoutMetrics = () => {
 };
 
 let layoutObserver = null;
+
+const onOpenCharacterEditor = (e) => { openCharacterEditor(e.detail.index); };
+
+const onOpenPersonaEditor = (e) => {
+    previousViewForEditor.value = currentView.value;
+    if (currentView.value === 'view-chat') {
+        shouldOpenPersonasOnReturn.value = true;
+    }
+    isDeleting.value = false;
+    editingPersonaIndex.value = e.detail.index;
+    editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
+    currentView.value = 'view-persona-edit';
+};
+
+const onNavigateTo = (e) => { currentView.value = e.detail; };
+
+const onOpenOnboarding = () => { isOnboarding.value = true; };
+
+const onTriggerOpenImage = (e) => {
+    const { src, name, description, onCloseCallback } = e.detail;
+    logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
+    if (imageViewerMode.value === 'holo' || imageViewerMode.value === 'holocards') {
+        window.dispatchEvent(new CustomEvent('open-holocards', {
+            detail: { src, name, description, onCloseCallback }
+        }));
+    } else {
+        logger.debug('[App] Dispatching open-image-viewer');
+        window.dispatchEvent(new CustomEvent('open-image-viewer', {
+            detail: { src, description, onCloseCallback }
+        }));
+    }
+};
+
+const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
+
+const onOpenConnections = (e) => {
+    const { type, id, name } = e.detail || {};
+    waitForComponent(connectionsSheetRef, (comp) => {
+        comp.open(type, id, name, activeChatCharObj.value);
+    });
+};
+
+const onOpenItemEditor = (e) => {
+    const { type, id } = e.detail;
+    if (type === 'lorebook') {
+        waitForComponent(lorebookSheetRef, (comp) => {
+            comp.openLorebook(id);
+        });
+    } else if (type === 'preset') {
+        waitForComponent(presetViewRef, (comp) => {
+            comp.openPreset(id);
+        });
+    } else if (type === 'persona') {
+        const index = allPersonas.value.findIndex(p => p.id === id);
+        if (index !== -1) {
+            const persona = allPersonas.value[index];
+            window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
+        }
+    }
+};
+
+const onOpenLorebookEntry = (e) => {
+    const { lorebookId, entryId } = e.detail;
+    if (currentView.value === 'view-chat') {
+        waitForComponent(chatViewRef, (comp) => {
+            comp.openLorebookEntry(lorebookId, entryId);
+        });
+    }
+};
+
+const onOpenBackupSheet = () => {
+    waitForComponent(backupSheetRef, (comp) => {
+        comp.open();
+    });
+};
+
+const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
+const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
+const onHeaderReset = () => { isHeaderEditorMode.value = false; };
 
 const handleOpenChatEvent = async (e) => {
     logger.debug("[App] Received open-chat event:", e.detail);
@@ -504,91 +583,27 @@ onMounted(async () => {
 
     
     // Listen for editor events
-    window.addEventListener('open-character-editor', (e) => {
-        openCharacterEditor(e.detail.index);
-    });
-
-    window.addEventListener('open-persona-editor', (e) => {
-        previousViewForEditor.value = currentView.value;
-        if (currentView.value === 'view-chat') {
-            shouldOpenPersonasOnReturn.value = true;
-        }
-        isDeleting.value = false;
-        editingPersonaIndex.value = e.detail.index;
-        editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
-        currentView.value = 'view-persona-edit';
-    });
-
-    window.addEventListener('navigate-to', (e) => {
-        currentView.value = e.detail;
-    });
-
+    window.addEventListener('open-character-editor', onOpenCharacterEditor);
+    window.addEventListener('open-persona-editor', onOpenPersonaEditor);
+    window.addEventListener('navigate-to', onNavigateTo);
     window.addEventListener('language-changed', onLanguageChanged);
     window.addEventListener('open-chat', handleOpenChatEvent);
-    window.addEventListener('open-onboarding', () => { isOnboarding.value = true; });
+    window.addEventListener('open-onboarding', onOpenOnboarding);
 
     const pendingData = consumePendingNotificationData();
     if (pendingData) {
         handleOpenChatEvent({ detail: pendingData });
     }
 
-    window.addEventListener('trigger-open-image', (e) => {
-        const { src, name, description, onCloseCallback } = e.detail;
-        logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode);
-        if (imageViewerMode === 'holo' || imageViewerMode === 'holocards') {
-            window.dispatchEvent(new CustomEvent('open-holocards', { 
-                detail: { src, name, description, onCloseCallback } 
-            }));
-        } else {
-            logger.debug('[App] Dispatching open-image-viewer');
-            window.dispatchEvent(new CustomEvent('open-image-viewer', { 
-                detail: { src, onCloseCallback } 
-            }));
-        }
-    });
-
-    window.addEventListener('open-fs-request', (e) => {
-        openFsEditor(e.detail);
-    });
-
-    window.addEventListener('open-connections', (e) => {
-        const { type, id, name } = e.detail || {};
-        waitForComponent(connectionsSheetRef, (comp) => {
-            comp.open(type, id, name, activeChatCharObj.value);
-        });
-    });
-
-    window.addEventListener('open-item-editor', (e) => {
-        const { type, id } = e.detail;
-        if (type === 'lorebook') {
-            waitForComponent(lorebookSheetRef, (comp) => {
-                comp.openLorebook(id);
-            });
-        } else if (type === 'preset') {
-            waitForComponent(presetViewRef, (comp) => {
-                comp.openPreset(id);
-            });
-        } else if (type === 'persona') {
-            const index = allPersonas.value.findIndex(p => p.id === id);
-            if (index !== -1) {
-                const persona = allPersonas.value[index];
-                window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
-            }
-        }
-    });
-
-    window.addEventListener('open-lorebook-entry', (e) => {
-        const { lorebookId, entryId } = e.detail;
-        if (currentView.value === 'view-chat') {
-            waitForComponent(chatViewRef, (comp) => {
-                comp.openLorebookEntry(lorebookId, entryId);
-            });
-        }
-    });
-
-    window.addEventListener('header-setup-editor', () => { isHeaderEditorMode.value = true; });
-    window.addEventListener('header-setup-generation', () => { isHeaderEditorMode.value = false; });
-    window.addEventListener('header-reset', () => { isHeaderEditorMode.value = false; });
+    window.addEventListener('trigger-open-image', onTriggerOpenImage);
+    window.addEventListener('open-fs-request', onOpenFsRequest);
+    window.addEventListener('open-connections', onOpenConnections);
+    window.addEventListener('open-item-editor', onOpenItemEditor);
+    window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.addEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.addEventListener('header-setup-editor', onHeaderSetupEditor);
+    window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
+    window.addEventListener('header-reset', onHeaderReset);
 
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
@@ -614,15 +629,28 @@ onMounted(async () => {
     setTimeout(checkAndRequestNotifications, 1000);
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', () => { isKeyboardOpen.value = true; }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { isKeyboardOpen.value = false; }));
+        kbListeners.push(await onKeyboardShow(() => { isKeyboardOpen.value = true; }));
+        kbListeners.push(await onKeyboardHide(() => { isKeyboardOpen.value = false; }));
     }
 });
 
 onBeforeUnmount(() => {
     if (layoutObserver) layoutObserver.disconnect();
-    window.removeEventListener('open-chat', handleOpenChatEvent);
+    window.removeEventListener('open-character-editor', onOpenCharacterEditor);
+    window.removeEventListener('open-persona-editor', onOpenPersonaEditor);
+    window.removeEventListener('navigate-to', onNavigateTo);
     window.removeEventListener('language-changed', onLanguageChanged);
+    window.removeEventListener('open-chat', handleOpenChatEvent);
+    window.removeEventListener('open-onboarding', onOpenOnboarding);
+    window.removeEventListener('trigger-open-image', onTriggerOpenImage);
+    window.removeEventListener('open-fs-request', onOpenFsRequest);
+    window.removeEventListener('open-connections', onOpenConnections);
+    window.removeEventListener('open-item-editor', onOpenItemEditor);
+    window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
+    window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
+    window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
+    window.removeEventListener('header-reset', onHeaderReset);
     kbListeners.forEach(l => l.remove());
 });
 
@@ -674,9 +702,16 @@ watch(currentView, () => {
           </div>
 
           <!-- VIEW 3: MENU -->
-          <MenuView 
+          <MenuView
               class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-menu'" 
+              v-else-if="currentView === 'view-menu'"
+          />
+
+          <!-- VIEW: GLOSSARY -->
+          <GlossaryView
+              class="view active-view view-gray-bg"
+              v-else-if="currentView === 'view-glossary'"
+              :view-mode="true"
           />
 
           <!-- VIEW: THEME SETTINGS -->
@@ -724,9 +759,11 @@ watch(currentView, () => {
     </div>
 
     <!-- Global Bottom Sheet -->
-    <BottomSheet 
+    <BottomSheet
         :visible="bottomSheetState.visible"
+        :locked="bottomSheetState.locked"
         :title="bottomSheetState.title"
+        :help-tip="bottomSheetState.helpTip"
         :content="bottomSheetState.content"
         :items="bottomSheetState.items"
         :header-action="bottomSheetState.headerAction"
@@ -742,6 +779,9 @@ watch(currentView, () => {
 
     <!-- Standard Image Viewer -->
     <ImageViewer />
+
+    <!-- Toast -->
+    <AppToast />
   </div>
 
   <!-- Full Screen Editor (Managed by App.vue now) -->
@@ -754,7 +794,9 @@ watch(currentView, () => {
 
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
+  <BackupSheet ref="backupSheetRef" />
   <PresetView ref="presetViewRef" />
+  <NotificationsSheet />
 
 </template>
 
@@ -810,7 +852,7 @@ watch(currentView, () => {
 }
 
 #main-container.keyboard-open {
-    padding-bottom: var(--keyboard-height, 300px) !important;
+    padding-bottom: var(--keyboard-overlap, 300px) !important;
 }
 
 .active-view::-webkit-scrollbar-track {

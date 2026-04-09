@@ -10,6 +10,7 @@ import { getEffectivePersona, personaConnections } from '@/core/states/personaSt
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
 import { db } from '@/utils/db.js';
 import { getLastPrompt } from '@/core/services/generationService.js';
+import { getImageGenSettings } from '@/core/services/imageGenService.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
 import PersonasSheet from '@/views/PersonasView.vue';
@@ -34,10 +35,12 @@ const emit = defineEmits([
     'magic-lorebooks',
     'magic-regex',
     'request-preview',
-    'add-block'
+    'add-block',
+    'magic-image-gen',
+    'magic-glossary'
 ]);
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isEditing = ref(false);
 const dragSrcIndex = ref(-1);
@@ -55,7 +58,9 @@ const allAvailableItems = [
     { id: 'presets', i18n: 'subtab_preset', fallback: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', event: 'magic-presets' },
     { id: 'preview', i18n: 'magic_request_preview', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'request-preview' },
     { id: 'personas', i18n: 'tab_personas', fallback: 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z', event: 'magic-personas' },
-    { id: 'connections', i18n: 'header_connections', fallback: 'Bindings', icon: 'M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z', event: 'magic-connections' }
+    { id: 'connections', i18n: 'header_connections', fallback: 'Bindings', icon: 'M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z', event: 'magic-connections' },
+    { id: 'image-gen', i18n: 'imggen_title', fallback: 'Image Gen', icon: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z', event: 'magic-image-gen' },
+    { id: 'glossary', i18n: 'menu_glossary', fallback: 'Glossary', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z', event: 'magic-glossary' }
 ];
 
 const loadDeletedItems = () => {
@@ -131,6 +136,9 @@ const handleAction = (item) => {
         personasSheet.value?.open();
     } else if (item.id === 'connections') {
         window.dispatchEvent(new CustomEvent('open-connections'));
+        emit('close');
+    } else if (item.id === 'image-gen') {
+        emit('magic-image-gen');
         emit('close');
     } else {
         emit(item.event);
@@ -375,6 +383,8 @@ const generationTokens = computed(() => {
     return prompt.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0);
 });
 
+const imageGenEnabled = computed(() => getImageGenSettings().enabled);
+
 const activeConnectionsCount = computed(() => {
     let count = 0;
     if (props.activeChar?.id) {
@@ -449,6 +459,7 @@ defineExpose({
                                 <span class="item-status" v-else-if="item.id === 'regex'"><span>{{ activeRegexCount }} {{ pluralize(activeRegexCount, 'count_scripts') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'api'"><span>{{ activeApiPresetName }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'connections'"><span>{{ activeConnectionsCount }} {{ pluralize(activeConnectionsCount, 'count_bindings') }}</span></span>
+                                <span class="item-status" v-else-if="item.id === 'image-gen'"><span>{{ imageGenEnabled ? (t('imggen_status_on') || 'On') : (t('imggen_status_off') || 'Off') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'preview' && generationTokens > 0"><span>{{ generationTokens }} {{ pluralize(generationTokens, 'count_tokens') }}</span></span>
                             </div>
                         </div>
@@ -517,7 +528,7 @@ defineExpose({
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-gutter: stable;
-    padding: 4px 10px 30px 10px;
+    padding: 4px 10px calc(30px + var(--sab)) 10px;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px 6px;

@@ -1,3 +1,5 @@
+import { replaceMacros } from '../utils/macroEngine.js';
+
 let GPTTokenizer = null;
 const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
@@ -10,17 +12,33 @@ if (!isIOS) {
     });
 }
 
+/**
+ * Strips embedded base64 media from text so it doesn't inflate token counts.
+ * LLM responses may contain HTML blocks with massive data:image/... URIs
+ * (hundreds of KB of base64) that are rendered visually but should not count
+ * toward the context window.
+ */
+function stripEmbeddedMedia(text) {
+    if (!text || text.length < 256) return text;
+    // Remove <img> tags whose src is a data URI
+    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
+    // Remove bare data:image/...base64,... URIs (>256 chars to avoid false positives)
+    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
+    return cleaned;
+}
+
 function estimateTokens(text) {
     if (!text) return 0;
+    const cleaned = stripEmbeddedMedia(text);
     if (GPTTokenizer && typeof GPTTokenizer.countTokens === 'function') {
         try {
-            return GPTTokenizer.countTokens(text);
+            return GPTTokenizer.countTokens(cleaned);
         } catch (e) {
             // Fallback for any errors during full tokenization
         }
     }
     // Lightweight heuristic fallback
-    return Math.ceil(text.length / 3.35);
+    return Math.ceil(cleaned.length / 3.35);
 }
 
 function escapeRegex(string) {
@@ -48,96 +66,11 @@ function tryCreateRegex(pattern, flags = 'g') {
     }
 }
 
-function simpleHash(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash |= 0;
-    }
-    return Math.abs(hash);
-}
-
-function rollDice(dice) {
-    const match = dice.match(/(\d+)d(\d+)/i);
-    if (!match) return dice;
-    const count = parseInt(match[1]);
-    const sides = parseInt(match[2]);
-    let total = 0;
-    for (let i = 0; i < count; i++) {
-        total += Math.floor(Math.random() * sides) + 1;
-    }
-    return total.toString();
-}
-
-function replaceMacros(text, char, persona, sessionVars, charId, sessionId, notifyObj) {
-    if (!text) return "";
-
-    // --- Comments ---
-    // Multi-line scoped: {{ // }} ... {{ /// }}
-    let result = text.replace(/\{\{\s*\/\/\s*\}\}[\s\S]*?\{\{\s*\/\/\/\s*\}\}/g, '');
-    // Single-line: {{// comment}}
-    result = result.replace(/\{\{\/\/[^}]*\}\}/g, '');
-
-    const charName = char ? char.name : "Character";
-    const charDesc = char ? (char.description || char.desc || "") : "";
-    const charScenario = char ? (char.scenario || "") : "";
-    const charPersonality = char ? (char.personality || "") : "";
-    const charMesExample = char ? (char.mes_example || "") : "";
-
-    const userName = persona ? persona.name : "User";
-    const userPersona = persona ? (persona.prompt || "") : "";
-
-    result = result.replace(/{{char}}/gi, charName)
-        .replace(/{{description}}/gi, charDesc)
-        .replace(/{{scenario}}/gi, charScenario)
-        .replace(/{{personality}}/gi, charPersonality)
-        .replace(/{{mesExamples}}/gi, charMesExample)
-        .replace(/{{user}}/gi, userName)
-        .replace(/{{persona}}/gi, userPersona);
-
-    if (result.includes("{{trim}}")) {
-        result = result.replace(/{{trim}}/gi, "").trim();
-    }
-
-    result = result.replace(/{{setvar::([\s\S]*?)::([\s\S]*?)}}/gi, (match, name, value) => {
-        sessionVars[name] = value;
-        notifyObj.varsChanged = true;
-        return "";
-    });
-
-    result = result.replace(/{{getvar::([\s\S]*?)}}/gi, (match, name) => {
-        return sessionVars[name] !== undefined ? sessionVars[name] : "";
-    });
-
-    result = result.replace(/{{random::(.*?)}}/gi, (match, optionsStr) => {
-        const options = optionsStr.split("::");
-        return options[Math.floor(Math.random() * options.length)];
-    });
-
-    let pickCount = 0;
-    result = result.replace(/{{pick::(.*?)}}/gi, (match, optionsStr) => {
-        const options = optionsStr.split("::");
-        const version = sessionVars.__pick_version || 0;
-        const seed = `${charId}_${sessionId}_pick_${pickCount++}_v${version}`;
-        const hash = simpleHash(seed);
-        return options[hash % options.length];
-    });
-
-    result = result.replace(/{{roll::(.*?)}}/gi, (match, dice) => {
-        return rollDice(dice);
-    });
-
-    // --- Escaping: \{\{ → {{ and \}\} → }} ---
-    result = result.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
-
-    return result;
-}
 
 function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, options = {}) {
     if (!text) return "";
     let processedText = text;
-    const { char, persona, sessionVars, charId, sessionId, notifyObj } = options;
+    const { char, persona, sessionVars, notifyObj } = options;
 
     for (const script of allScripts) {
         if (script.disabled) continue;
@@ -165,13 +98,13 @@ function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, opt
                 // Handle Macros
                 if (script.macroRules && script.macroRules !== '0') {
                     if (script.macroRules === '1') { // Raw
-                        pattern = replaceMacros(pattern, char, persona, sessionVars, charId, sessionId, notifyObj);
-                        replacement = replaceMacros(replacement, char, persona, sessionVars, charId, sessionId, notifyObj);
+                        pattern = replaceMacros(pattern, char, persona, sessionVars, notifyObj);
+                        replacement = replaceMacros(replacement, char, persona, sessionVars, notifyObj);
                     } else if (script.macroRules === '2') { // Escaped
                         pattern = pattern.replace(/{{user}}/gi, persona ? escapeRegex(persona.name) : 'User')
                             .replace(/{{char}}/gi, char ? escapeRegex(char.name) : 'Character');
-                        pattern = replaceMacros(pattern, char, persona, sessionVars, charId, sessionId, notifyObj);
-                        replacement = replaceMacros(replacement, char, persona, sessionVars, charId, sessionId, notifyObj);
+                        pattern = replaceMacros(pattern, char, persona, sessionVars, notifyObj);
+                        replacement = replaceMacros(replacement, char, persona, sessionVars, notifyObj);
                     }
                 }
 
@@ -348,8 +281,32 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
 }
 
+function squashHistory(historyMsgs, squashRole) {
+    if (!squashRole) return historyMsgs;
+    const result = [];
+    for (const msg of historyMsgs) {
+        const last = result[result.length - 1];
+        if (last && last.role === squashRole && msg.role === squashRole) {
+            last.content += '\n' + msg.content;
+        } else {
+            result.push({ ...msg });
+        }
+    }
+    return result;
+}
+
+function buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole) {
+    const squashed = squashHistory(historyMsgs, squashRole);
+    const lines = squashed.map(m => {
+        const prefix = m.role === 'user' ? (userPrefix || '') : (charPrefix || '');
+        return prefix + m.content;
+    });
+    return lines.join('\n');
+}
+
 function buildPromptMessagesWorker(args) {
-    const { char, history, summary, activePreset, mergePrompts, mergeRole, personaObj, authorsNote, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    if (noAssistant) mergePrompts = true;
 
     const messages = [];
     let mergeBuffer = [];
@@ -380,7 +337,7 @@ function buildPromptMessagesWorker(args) {
             const pos = entry.position ?? 0;
             const msg = {
                 role: 'system',
-                content: replaceMacros(entry.content || "", char, personaObj, sessionVars, charId, sessionId, notifyObj),
+                content: replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj),
                 blockName: `Lorebook: ${entry.keys?.[0] || 'Entry'}`,
                 isLorebook: true
             };
@@ -428,7 +385,15 @@ function buildPromptMessagesWorker(args) {
             let content = "";
             let role = block.role || "system";
 
-            if (block.id === 'user_persona') content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
+            if (block.id === 'guided_generation') {
+                const isImpersonation = guidanceType === 'impersonation';
+                if (!guidanceText && !isImpersonation) return null;
+                const template = isImpersonation
+                    ? (activePreset?.guidedImpersonationPrompt || '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]')
+                    : (activePreset?.guidedGenerationPrompt || '[Generate your next reply according to these instructions: {{guidance}}]');
+                content = template.replace(/\{\{guidance\}\}/gi, guidanceText || '');
+            }
+            else if (block.id === 'user_persona') content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
             else if (block.id === 'char_card') content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
             else if (block.id === 'char_personality') content = `Personality: ${char.personality}`;
             else if (block.id === 'scenario') content = `Scenario: ${char.scenario}`;
@@ -451,7 +416,7 @@ function buildPromptMessagesWorker(args) {
             if (!content) return null;
 
             // Execute macros on the final block content to catch embedded setvar/getvar
-            content = replaceMacros(content, char, personaObj, sessionVars, charId, sessionId, notifyObj);
+            content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
 
             return { content, role };
         };
@@ -486,17 +451,26 @@ function buildPromptMessagesWorker(args) {
                         let content = m.content !== undefined ? m.content : (m.text || m.mes || "");
 
                         // Macros and Regex
-                        content = replaceMacros(content, char, personaObj, sessionVars, charId, sessionId, notifyObj);
+                        content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
                         const placement = m.role === 'user' ? 1 : 2;
                         content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
 
                         return {
                             role: m.role || (m.isUser ? 'user' : 'assistant'),
                             content: content,
+                            image: m.image,
                             isHistory: true,
                             chatId: m.chatId !== undefined ? m.chatId : (m.originalIndex !== undefined ? m.originalIndex : i)
                         };
                     });
+                }
+
+                if (noAssistant) {
+                    const combinedContent = buildNoAssistantHistory(historyMsgs, userPrefix, charPrefix, squashRole);
+                    if (combinedContent) {
+                        messages.push({ role: 'assistant', content: combinedContent, blockName: 'chat_history', isHistory: true });
+                    }
+                    return;
                 }
 
                 const finalHistoryWithDepth = [];

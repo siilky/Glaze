@@ -1,17 +1,18 @@
 <script setup>
 import { ref, computed, reactive, onMounted } from 'vue';
-import { db } from '@/utils/db.js';
+import { importFullBackupAsync } from '@/core/services/backupService.js';
 import { addPersona, allPersonas, deletePersona } from '@/core/states/personaState.js';
 import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets } from '@/core/config/APISettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import BackupSheet from '@/components/sheets/BackupSheet.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, savePresets, setPresetConnection } from '@/core/states/presetState.js';
-import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/ui.js';
+import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/keyboardHandler.js';
 
-const t = (key) => translations[currentLang]?.[key] || key;
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const emit = defineEmits(['finish']);
 
@@ -19,65 +20,10 @@ const emit = defineEmits(['finish']);
 
 const currentSlide = ref(0);
 
+const backupSheet = ref(null);
+
 const triggerRestore = () => {
-    const input = document.getElementById('onboarding-restore-input');
-    if (input) input.click();
-};
-
-const handleRestoreFile = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    
-    if (!confirm(t('confirm_restore') || "This will overwrite current data. Continue?")) {
-        event.target.value = '';
-        return;
-    }
-
-    showBottomSheet({
-        title: t('importing_data') || "Importing Data",
-        bigInfo: {
-            icon: '<div class="app-loader-spinner" style="margin: 0 auto; width: 48px; height: 48px;"></div>',
-            description: t('please_wait') || "Please wait, reading and importing application data...",
-            buttonText: t('btn_wait') || "Wait...",
-            onButtonClick: () => {}
-        }
-    });
-
-    setTimeout(() => {
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-            try {
-                await db.importFullBackupAsync(e.target.result);
-                
-                showBottomSheet({
-                    title: "Restore Complete",
-                    bigInfo: {
-                        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#4CAF50"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                        description: "Restore successful! The app will now reload to apply changes.",
-                        buttonText: t('btn_ok') || "OK",
-                        onButtonClick: () => {
-                             localStorage.setItem('glaze_onboarding_completed', 'true');
-                             window.location.reload();
-                        }
-                    }
-                });
-            } catch (err) {
-                console.error("Restore failed", err);
-                showBottomSheet({
-                    title: t('title_error') || "Error",
-                    bigInfo: {
-                        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                        description: "Restore failed: " + err.message,
-                        buttonText: t('btn_ok') || "OK",
-                        onButtonClick: () => closeBottomSheet()
-                    }
-                });
-            }
-        };
-        reader.readAsText(file);
-    }, 100);
-    
-    event.target.value = '';
+    if (backupSheet.value) backupSheet.value.open();
 };
 
 // Form Data
@@ -141,10 +87,43 @@ const introContent = computed(() => [
     }
 ]);
 
+const featuresContent = computed(() => [
+    {
+        title: t('onboarding_feature_imggen_title'),
+        desc: t('onboarding_feature_imggen_desc'),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>'
+    },
+    {
+        title: t('onboarding_feature_glossary_title'),
+        desc: t('onboarding_feature_glossary_desc'),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>'
+    },
+    {
+        title: t('onboarding_feature_custom_title'),
+        desc: t('onboarding_feature_custom_desc'),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>'
+    },
+    {
+        title: t('onboarding_feature_st_title'),
+        desc: t('onboarding_feature_st_desc'),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>'
+    }
+]);
+
 const slides = computed(() => [
     {
         type: 'welcome',
         title: t('onboarding_slide1_title'),
+    },
+    {
+        type: 'features',
+        title: t('onboarding_features_title'),
+    },
+    {
+        type: 'data_import',
+        title: t('onboarding_slide_import_title'),
+        desc: t('onboarding_slide_import_desc'),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
     },
     {
         type: 'api',
@@ -183,7 +162,7 @@ const mainButtonLabel = computed(() => {
     if (isLastSlide.value) return t('onboarding_btn_start');
     
     const slide = slides.value[currentSlide.value];
-    if (slide.type === 'preset_import') {
+    if (slide.type === 'preset_import' || slide.type === 'data_import') {
         return t('onboarding_btn_skip');
     }
     if (slide.type === 'api') {
@@ -387,21 +366,16 @@ async function finish() {
         <div class="onboarding-card" :class="{ 'keyboard-open': globalKeyboardOpen }">
             <div class="slides-container">
                 <Transition name="slide-fade" mode="out-in">
-                    <div :key="currentSlide" class="slide" :class="{ 'welcome-align': slides[currentSlide].type === 'welcome' }">
+                    <div :key="currentSlide" class="slide" :class="{ 'welcome-align': ['welcome', 'features'].includes(slides[currentSlide].type) }">
                         
-                        <!-- Welcome Slide -->
-                        <div v-if="slides[currentSlide].type === 'welcome'" class="welcome-slide">
+                        <!-- Welcome / Features Slide -->
+                        <div v-if="slides[currentSlide].type === 'welcome' || slides[currentSlide].type === 'features'" class="welcome-slide">
                             <div class="welcome-header">
                                 <h1 class="welcome-title">{{ slides[currentSlide].title }}</h1>
-                                <button class="backup-fab-pill" @click="triggerRestore">
-                                    <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-                                    <span>{{ t('menu_import') || 'Backup' }}</span>
-                                </button>
-                                <input type="file" id="onboarding-restore-input" style="display: none" accept="*/*" @change="handleRestoreFile">
                             </div>
                             
                             <div class="intro-blocks-container">
-                                <div v-for="(item, index) in introContent" :key="index" class="intro-block">
+                                <div v-for="(item, index) in (slides[currentSlide].type === 'welcome' ? introContent : featuresContent)" :key="index" class="intro-block">
                                     <div class="intro-icon" v-html="item.icon"></div>
                                     <div class="intro-text">
                                         <h3>{{ item.title }}</h3>
@@ -483,6 +457,19 @@ async function finish() {
                             </div>
                         </div>
 
+                        <!-- Data Import Slide -->
+                        <div v-if="slides[currentSlide].type === 'data_import'" class="intro-blocks-container" style="margin-top: 24px;">
+                            <div class="intro-block clickable" @click="triggerRestore">
+                                <div class="intro-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                </div>
+                                <div class="intro-text">
+                                    <h3>{{ t('onboarding_btn_import_backup') }}</h3>
+                                    <p>{{ t('menu_backups') }}</p>
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
                 </Transition>
             </div>
@@ -501,6 +488,7 @@ async function finish() {
                 </button>
             </div>
         </div>
+        <BackupSheet ref="backupSheet" :z-index="10000" />
     </div>
 </template>
 
@@ -572,7 +560,7 @@ async function finish() {
 }
 
 .onboarding-card.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px) !important;
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px) !important;
 }
 
 .slides-container {

@@ -1,10 +1,13 @@
 <script setup>
-import { ref, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch } from 'vue';
 import { useViewer } from '@/composables/media/useViewer.js';
 
-const { visible, src: imgSrc, close, onAfterLeave } = useViewer('open-image-viewer');
+const { visible, src: imgSrc, description, close, onAfterLeave } = useViewer('open-image-viewer');
 const containerRef = ref(null);
 const imgRef = ref(null);
+
+const promptVisible = ref(true);
+const promptText = computed(() => description.value || '');
 
 // Zoom & Pan State
 let scale = 1;
@@ -136,13 +139,16 @@ const onContainerClick = (e) => {
             const tapY = e.clientY - rect.top - rect.height / 2;
             pointX = -1.5 * tapX;
             pointY = -1.5 * tapY;
-            
+
             if (imgRef.value) {
                 imgRef.value.style.transition = 'transform 0.3s ease';
                 updateTransform();
                 setTimeout(() => { if(imgRef.value) imgRef.value.style.transition = 'transform 0.1s ease-out'; }, 300);
             }
         }
+    } else if (promptText.value) {
+        e.stopPropagation();
+        promptVisible.value = !promptVisible.value;
     }
     lastTap = cur;
 };
@@ -150,7 +156,10 @@ const onContainerClick = (e) => {
 // Reset zoom when opening
 watch(visible, (newVal) => {
     if (newVal) {
-        nextTick(() => resetZoom());
+        nextTick(() => {
+            resetZoom();
+            promptVisible.value = true;
+        });
     }
 });
 </script>
@@ -169,6 +178,9 @@ watch(visible, (newVal) => {
                 >
                     <img ref="imgRef" class="image-viewer-img" :src="imgSrc" alt="Full view">
                 </div>
+                <Transition name="prompt-fade">
+                    <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>{{ promptText }}</div>
+                </Transition>
                 <div id="image-viewer-close-btn" class="close-btn-trigger" @click="handleCloseClick" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; padding: 10px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%;">
                     <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                 </div>
@@ -176,3 +188,34 @@ watch(visible, (newVal) => {
         </Transition>
     </Teleport>
 </template>
+
+<style scoped>
+.image-viewer-prompt {
+    position: absolute;
+    bottom: calc(20px + var(--sab, 0px));
+    left: 16px;
+    right: 16px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 12px;
+    padding: 12px 14px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    line-height: 1.5;
+    max-height: 30vh;
+    overflow-y: auto;
+    z-index: 20010;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.prompt-fade-enter-active,
+.prompt-fade-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.prompt-fade-enter-from,
+.prompt-fade-leave-to {
+    opacity: 0;
+    transform: translateY(8px);
+}
+</style>

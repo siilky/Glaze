@@ -1,16 +1,16 @@
 import { currentLang, themeMode, setThemeMode, getThemeMode, imageViewerMode, setImageViewerMode } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
-import { SystemBars, Capacitor } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { Toast } from '@capacitor/toast';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { Keyboard, KeyboardResize } from '@capacitor/keyboard';
 import { SafeArea } from '@capacitor-community/safe-area';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
+import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
 const _activeLongPressTimers = new Set();
@@ -103,8 +103,6 @@ export function attachLongPress(element, callback) {
     return () => isLongPress;
 }
 
-export const isKeyboardOpen = ref(false);
-
 export function attachRipple(el) {
     if (el.dataset.rippleInit) return;
     el.dataset.rippleInit = 'true';
@@ -138,6 +136,8 @@ export function attachRipple(el) {
     });
 }
 
+let _rippleDelegationAdded = false;
+
 export function initRipple() {
     // Inject styles for the new ripple if not present
     if (!document.getElementById('ripple-effect-styles')) {
@@ -162,6 +162,36 @@ export function initRipple() {
 
     const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .api-status, .glass-panel, .segmented-control, .bottom-sheet-content');
     elements.forEach(attachRipple);
+
+    if (!_rippleDelegationAdded) {
+        _rippleDelegationAdded = true;
+        document.addEventListener('pointerdown', function (e) {
+            const trigger = e.target.closest('.list-item, .triggered-item-card, .list-container');
+            if (!trigger || trigger.dataset.rippleInit) return;
+
+            const bgContainer = trigger.closest('.view-content-wrapper') || document.body;
+
+            const circle = document.createElement('span');
+            const diameter = Math.max(window.innerWidth, window.innerHeight) * 2;
+            const radius = diameter / 2;
+
+            circle.style.width = circle.style.height = `${diameter}px`;
+            circle.style.left = `${e.clientX - radius}px`;
+            circle.style.top = `${e.clientY - radius}px`;
+            circle.style.position = 'fixed';
+            circle.style.zIndex = '0';
+            circle.style.pointerEvents = 'none';
+            circle.classList.add('ripple');
+
+            circle.style.background = `radial-gradient(circle, rgba(var(--vk-blue-rgb), 0.1) 0%, transparent 70%)`;
+
+            circle.addEventListener('animationend', () => {
+                circle.remove();
+            });
+
+            bgContainer.appendChild(circle);
+        });
+    }
 }
 
 export function rgbToHex(rgb) {
@@ -223,8 +253,8 @@ export async function updateAppColors(forceMainView = false) {
 
     try {
         // DARK = light icons on dark background, LIGHT = dark icons on light background
-        await SystemBars.setStyle({ style: isDark ? 'DARK' : 'LIGHT' });
-    } catch (e) { console.warn('SystemBars error', e); }
+        await SafeArea.setSystemBarsStyle({ style: isDark ? 'DARK' : 'LIGHT' });
+    } catch (e) { console.warn('SafeArea SystemBars error', e); }
 }
 
 export function initThemeToggle() {
@@ -271,7 +301,7 @@ export function initThemeToggle() {
 
     const updateThemeText = () => {
         if (!themeValue) return;
-        const t = translations[currentLang] || {};
+        const t = translations[currentLang.value] || {};
         const map = {
             'system': t.theme_system || 'System',
             'dark': t.theme_dark || 'Dark',
@@ -283,7 +313,7 @@ export function initThemeToggle() {
 
     if (themeSelector) {
         themeSelector.addEventListener('click', () => {
-            const t = translations[currentLang] || {};
+            const t = translations[currentLang.value] || {};
             const getIcon = (mode) => getThemeMode() === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
             showBottomSheet({
                 title: t.theme_title || 'Theme',
@@ -302,13 +332,13 @@ export function initThemeToggle() {
 
     const updateHoloText = () => {
         if (!holoValue) return;
-        holoValue.textContent = imageViewerMode === 'holo' ? 'Holo Card' : 'Standard';
+        holoValue.textContent = imageViewerMode.value === 'holo' ? 'Holo Card' : 'Standard';
     };
     updateHoloText();
 
     if (holoSelector) {
         holoSelector.addEventListener('click', () => {
-            const getIcon = (mode) => imageViewerMode === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
+            const getIcon = (mode) => imageViewerMode.value === mode ? '<svg viewBox="0 0 24 24" style="fill: var(--vk-blue);"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '';
             showBottomSheet({
                 title: 'Image viewer',
                 items: [
@@ -355,7 +385,7 @@ export function initHeaderDropdown(categories, activeCategories, onCategoryChang
             const el = document.createElement('div');
             el.className = 'dropdown-item' + (item.id === currentVal ? ' selected' : '');
             el.innerHTML = `
-                <span>${translations[currentLang][item.i18n]}</span>
+                <span>${translations[currentLang.value][item.i18n]}</span>
                 <svg class="dropdown-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
             `;
             el.addEventListener('click', () => {
@@ -455,139 +485,15 @@ export function initViewportFix() {
 
     // Fix for 100vh on mobile browsers (address bar issue)
     const setVh = () => {
-        // Skip recalculating height while the keyboard is open to avoid layout jumps
-        if (isKeyboardOpen.value) return;
-
+        if (isKeyboardOpen.value && isIos) return;
         const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
-    };
-
-    const updateSafeAreas = async () => {
-        try {
-            const result = await SafeArea.getSafeAreaInsets();
-            const insets = result.insets;
-            const shorthands = { top: 'sat', bottom: 'sab', left: 'sal', right: 'sar' };
-            for (const [key, value] of Object.entries(insets)) {
-                let finalValue = value;
-                document.documentElement.style.setProperty(`--safe-area-inset-${key}`, `${finalValue}px`);
-                if (shorthands[key]) {
-                    document.documentElement.style.setProperty(`--${shorthands[key]}`, `${finalValue}px`);
-                }
-            }
-            logger.debug('[UI] Safe area insets updated:', insets);
-        } catch (e) {
-            console.warn('[UI] Failed to get safe area insets', e);
-        }
     };
 
     window.addEventListener('resize', setVh);
     setVh();
 
-    // Initial safe area update
-    updateSafeAreas();
-
-    // Listen for safe area changes (especially important for rotation/split view)
-    SafeArea.addListener('safeAreaChanged', (data) => {
-        const insets = data.insets;
-        const shorthands = { top: 'sat', bottom: 'sab', left: 'sal', right: 'sar' };
-        for (const [key, value] of Object.entries(insets)) {
-            let finalValue = value;
-            document.documentElement.style.setProperty(`--safe-area-inset-${key}`, `${finalValue}px`);
-            if (shorthands[key]) {
-                document.documentElement.style.setProperty(`--${shorthands[key]}`, `${finalValue}px`);
-            }
-        }
-            logger.debug('[UI] Safe area changed:', insets);
-    });
-
-    // Set default keyboard height for drawer
-    const savedKbHeight = localStorage.getItem('gz_keyboard_height');
-    document.documentElement.style.setProperty('--keyboard-height', savedKbHeight ? `${savedKbHeight}px` : '300px');
-
-    if (Capacitor.isNativePlatform()) {
-        Keyboard.setResizeMode({ mode: KeyboardResize.None }).catch(() => { });
-
-        Keyboard.setScroll({ isDisabled: true }).catch(e => console.warn('Keyboard setScroll error', e));
-
-        // Android WebView forcefully scrolls the body when an input is focused,
-        // even with position:fixed and overflow:hidden. This shifts all fixed overlays.
-        // We fight this by constantly resetting the body scroll.
-        let _scrollResetRaf = null;
-        let preKeyboardHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-
-        function resetBodyScroll() {
-            if (document.body.scrollTop !== 0) {
-                document.body.scrollTop = 0;
-            }
-            window.scrollTo(0, 0);
-        }
-
-        function startScrollResetLoop() {
-            if (_scrollResetRaf) return;
-            function tick() {
-                resetBodyScroll();
-                if (isKeyboardOpen.value) {
-                    // Dynamically adjust overlap to prevent double padding if OS natively shrinks viewport
-                    const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                    const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
-                    const currentKbHeight = parseInt(document.documentElement.style.getPropertyValue('--keyboard-height')) || 0;
-                    if (currentKbHeight > 0) {
-                        const effectiveOverlap = Math.max(0, currentKbHeight - viewportShrunk);
-                        document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
-                    }
-
-                    _scrollResetRaf = requestAnimationFrame(tick);
-                } else {
-                    _scrollResetRaf = null;
-                }
-            }
-            _scrollResetRaf = requestAnimationFrame(tick);
-        }
-
-        function stopScrollResetLoop() {
-            if (_scrollResetRaf) {
-                cancelAnimationFrame(_scrollResetRaf);
-                _scrollResetRaf = null;
-            }
-            // Final reset after keyboard closes
-            resetBodyScroll();
-            setTimeout(resetBodyScroll, 100);
-        }
-
-        Keyboard.addListener('keyboardWillShow', (info) => {
-            if (!isKeyboardOpen.value) {
-                preKeyboardHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            }
-            isKeyboardOpen.value = true;
-            document.body.classList.add('keyboard-open');
-            resetBodyScroll();
-            
-            if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
-                
-                const currentHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-                const viewportShrunk = Math.max(0, preKeyboardHeight - currentHeight);
-                const effectiveOverlap = Math.max(0, info.keyboardHeight - viewportShrunk);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${effectiveOverlap}px`);
-            }
-            startScrollResetLoop();
-        });
-
-        Keyboard.addListener('keyboardDidShow', (info) => {
-            if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                localStorage.setItem('gz_keyboard_height', info.keyboardHeight);
-            }
-            resetBodyScroll();
-        });
-        Keyboard.addListener('keyboardWillHide', () => {
-            isKeyboardOpen.value = false;
-            document.body.classList.remove('keyboard-open');
-            document.documentElement.style.setProperty('--keyboard-overlap', '0px');
-            stopScrollResetLoop();
-        });
-    }
+    initKeyboard();
 }
 
 export function initBackButton() {
@@ -595,7 +501,7 @@ export function initBackButton() {
     const handleBackButton = async () => {
         // 0. If keyboard is open — dismiss it
         if (isKeyboardOpen.value) {
-            await Keyboard.hide().catch(() => { });
+            await hideKeyboard();
             return;
         }
 
@@ -609,7 +515,11 @@ export function initBackButton() {
         // 1.1 Check SheetView
         const openSheetView = document.querySelector('.sheet-view-overlay.visible');
         if (openSheetView) {
-            openSheetView.click();
+            const backEvent = new CustomEvent('hw-back', { cancelable: true });
+            openSheetView.dispatchEvent(backEvent);
+            if (!backEvent.defaultPrevented) {
+                openSheetView.click();
+            }
             return;
         }
 
@@ -675,7 +585,7 @@ export function initBackButton() {
         } else {
             lastBackPress = now;
             await Toast.show({
-                text: (translations[currentLang] && translations[currentLang]['exit_hint']) || 'Press again to exit',
+                text: (translations[currentLang.value] && translations[currentLang.value]['exit_hint']) || 'Press again to exit',
                 duration: 'short',
                 position: 'bottom'
             });
@@ -685,6 +595,13 @@ export function initBackButton() {
     App.addListener('backButton', handleBackButton);
     // For console testing: window.simulateBackButton()
     window.simulateBackButton = handleBackButton;
+
+    // Handle Escape key as back button
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            handleBackButton();
+        }
+    });
 }
 
 export function animateTextChange(element, newText, direction, onUpdate) {

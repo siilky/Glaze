@@ -1,18 +1,18 @@
 <!-- src/components/ui/SheetView.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
-import { Keyboard } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
-import { isKeyboardOpen as globalKeyboardOpen } from '@/core/services/ui.js';
+import { isKeyboardOpen as globalKeyboardOpen, hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 
 const props = defineProps({
     fitContent: { type: Boolean, default: false },
-    zIndex: { type: [Number, String], default: 990 },
+    zIndex: { type: [Number, String], default: 11000 },
     title: { type: String, default: '' },
     showBack: { type: Boolean, default: false },
     actions: { type: Array, default: () => [] },
     tabs: { type: Array, default: () => [] },
-    activeTab: { type: String, default: '' }
+    activeTab: { type: String, default: '' },
+    viewMode: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab', 'tab-click']);
@@ -22,6 +22,7 @@ const isExpanded = ref(false);
 const isDragging = ref(false);
 const startY = ref(0);
 const currentDragY = ref(0);
+const wasExpandedBeforeKeyboard = ref(false);
 
 const sheetStyle = computed(() => {
     if (!isVisible.value) {
@@ -76,6 +77,7 @@ const sheetStyle = computed(() => {
 });
 
 function open() {
+    if (props.viewMode) return;
     isVisible.value = true;
     isExpanded.value = false;
 }
@@ -89,7 +91,7 @@ function close() {
             active.blur();
         }
         if (Capacitor.isNativePlatform()) {
-            Keyboard.hide().catch(() => {});
+            hideKeyboard();
         }
     }
     isVisible.value = false;
@@ -142,19 +144,29 @@ function onHandleTouchEnd() {
     currentDragY.value = 0;
 }
 
+function onHwBack(e) {
+    if (props.showBack) {
+        emit('back');
+        e.preventDefault();
+    }
+}
+
 defineExpose({ open, close, isVisible, isExpanded });
 
 const sheetViewContentRef = ref(null);
 const isLocalKeyboardOpen = ref(false);
+const isTextFieldFocusedInSheet = ref(false);
 
-function checkFocus() {
+function updateFocusState() {
     const active = document.activeElement;
-    if (!active) return;
+    if (!active) {
+        isTextFieldFocusedInSheet.value = false;
+        return;
+    }
     
     const isInside = sheetViewContentRef.value?.contains(active) || active?.closest('.sheet-view-content');
 
     if (isInside) {
-        // Only trigger if it's a text-entry field that actually opens a virtual keyboard
         const tagName = active.tagName;
         let isTextEntry = false;
         
@@ -167,54 +179,69 @@ function checkFocus() {
             isTextEntry = true;
         }
 
-        if (isTextEntry) {
-            isLocalKeyboardOpen.value = true;
-            
-            // Ensure overlap is set so the sheet can actually rise
-            const cs = getComputedStyle(document.documentElement);
-            const overlap = cs.getPropertyValue('--keyboard-overlap').trim();
-            if (overlap === '0px' || !overlap) {
-                const kbH = cs.getPropertyValue('--keyboard-height').trim() || '300px';
-                document.documentElement.style.setProperty('--keyboard-overlap', kbH);
-            }
+        isTextFieldFocusedInSheet.value = isTextEntry;
 
-            // Force keyboard on Android if needed
-            if (Capacitor.isNativePlatform()) {
-                Keyboard.show().catch(() => {});
-            }
-        } else {
-            isLocalKeyboardOpen.value = false;
+        // Force keyboard on Android if needed
+        if (isTextEntry && Capacitor.isNativePlatform()) {
+            showKeyboard();
         }
     } else {
-        isLocalKeyboardOpen.value = false;
+        isTextFieldFocusedInSheet.value = false;
+    }
+
+    // On non-native (web), drive keyboard state from focus since there are no native keyboard events
+    if (!Capacitor.isNativePlatform()) {
+        isLocalKeyboardOpen.value = isTextFieldFocusedInSheet.value;
     }
 }
 
 let kbListeners = [];
 
 function onSheetFocusIn() {
-    checkFocus();
-    // Reset viewport pan to prevent double offset (CSS padding + browser pan)
+    updateFocusState();
     if (isLocalKeyboardOpen.value) {
         window.scrollTo(0, 0);
     }
 }
 
+function expandForKeyboard() {
+    if (!isExpanded.value && !props.fitContent) {
+        wasExpandedBeforeKeyboard.value = false;
+        isExpanded.value = true;
+        emit('update:expanded', true);
+    } else {
+        wasExpandedBeforeKeyboard.value = true;
+    }
+}
+
+function restoreAfterKeyboard() {
+    if (!wasExpandedBeforeKeyboard.value && !props.fitContent) {
+        isExpanded.value = false;
+        emit('update:expanded', false);
+    }
+}
+
 onMounted(async () => {
     document.addEventListener('focusin', onSheetFocusIn);
-    document.addEventListener('focusout', () => { setTimeout(checkFocus, 50); });
+    document.addEventListener('focusout', () => { setTimeout(updateFocusState, 50); });
 
     if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await Keyboard.addListener('keyboardWillShow', (info) => { 
-            checkFocus();
-            window.scrollTo(0, 0);
-            if (info && info.keyboardHeight) {
-                document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
-                document.documentElement.style.setProperty('--keyboard-overlap', `${info.keyboardHeight}px`);
+        kbListeners.push(await onKeyboardShow((info) => { 
+            updateFocusState();
+            // Only react if a text field inside THIS sheet is focused
+            if (isTextFieldFocusedInSheet.value && isVisible.value) {
+                window.scrollTo(0, 0);
+                if (info && info.keyboardHeight) {
+                    applyKeyboardOverlap(info.keyboardHeight);
+                }
+                isLocalKeyboardOpen.value = true;
+                expandForKeyboard();
             }
         }));
-        kbListeners.push(await Keyboard.addListener('keyboardWillHide', () => { 
-            isLocalKeyboardOpen.value = false; 
+        kbListeners.push(await onKeyboardHide(() => { 
+            isLocalKeyboardOpen.value = false;
+            isTextFieldFocusedInSheet.value = false;
+            restoreAfterKeyboard();
         }));
     }
 });
@@ -226,8 +253,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <Teleport to="body">
-        <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close">
+    <!-- ── View mode: inline content, no overlay/drag ── -->
+    <div v-if="viewMode" class="sheet-view-inline">
+        <slot></slot>
+    </div>
+
+    <Teleport v-else to="body">
+        <div class="sheet-view-overlay" :class="{ visible: isVisible }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
             <div ref="sheetViewContentRef"
                  class="sheet-view-content" 
                  :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen || globalKeyboardOpen, 'fit-content': fitContent }"
@@ -288,6 +320,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.sheet-view-inline {
+    display: flex;
+    flex-direction: column;
+}
+
 .sheet-view-overlay {
     position: fixed;
     top: 0;
@@ -295,7 +332,7 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
     background-color: rgba(0,0,0,0.5);
-    z-index: 990;
+    z-index: 11000;
     display: flex;
     justify-content: center;
     align-items: flex-end;
@@ -333,7 +370,7 @@ onBeforeUnmount(() => {
 }
 
 .sheet-view-content.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px + var(--sab, 0px) + var(--sheet-translate, 0px)) !important;
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px) !important;
 }
 
 .sheet-view-content.expanded {

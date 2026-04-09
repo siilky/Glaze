@@ -1,4 +1,4 @@
-import { BackgroundTask } from '@capawesome/capacitor-background-task';
+import { BackgroundMode } from '@anuradev/capacitor-background-mode';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { cleanText } from '@/utils/textFormatter.js';
@@ -18,11 +18,18 @@ export async function executeRequest({
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    const t = (key) => translations[currentLang]?.[key] || key;
+    const t = (key) => translations[currentLang.value]?.[key] || key;
     const headerModel = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_model')}</span>`;
     const headerInline = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_inline')}</span>`;
 
     const hasInlineTags = !!tagStart && !!tagEnd;
+
+    // Timeout configuration (configurable via localStorage for future settings UI)
+    const CONNECT_TIMEOUT = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
+    const STREAM_TIMEOUT = parseInt(localStorage.getItem('gz_api_stream_timeout')) || 120000;
+    let connectTimer = null;
+    let streamTimer = null;
+    let timedOut = false;
 
     // Keep screen on during generation to prevent OS suspension
     let wakeLock = null;
@@ -37,29 +44,17 @@ export async function executeRequest({
     const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Setup Background Task to keep app alive if backgrounded
-    let backgroundTaskId = null;
-    let completeBackgroundTask = null;
-    let isTaskFinished = false;
+    // Keep app alive when backgrounded during generation
     const isAndroid = Capacitor.getPlatform() === 'android';
+    const isIos = Capacitor.getPlatform() === 'ios';
 
     if (isAndroid) {
-        await startGenerationNotification('Glaze', translations[currentLang]['model_typing'] || 'Generating...');
-    } else {
-        // Fallback for iOS and other platforms
+        await startGenerationNotification('Glaze', translations[currentLang.value]['model_typing'] || 'Generating...');
+    } else if (isIos) {
         try {
-            backgroundTaskId = await BackgroundTask.beforeExit(async () => {
-                if (isTaskFinished) {
-                    if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-                    return;
-                }
-                await new Promise(resolve => {
-                    completeBackgroundTask = resolve;
-                });
-                if (backgroundTaskId) BackgroundTask.finish({ taskId: backgroundTaskId });
-            });
+            await BackgroundMode.enable();
         } catch (e) {
-            console.warn("Background Task setup failed:", e);
+            console.warn("BackgroundMode enable failed:", e);
         }
     }
 
@@ -83,7 +78,9 @@ export async function executeRequest({
                 url: `${apiUrl}/chat/completions`,
                 headers: headers,
                 data: requestBody,
-                responseType: 'json'
+                responseType: 'json',
+                connectTimeout: CONNECT_TIMEOUT,
+                readTimeout: STREAM_TIMEOUT
             });
 
             if (response.status >= 400) {
@@ -121,12 +118,18 @@ export async function executeRequest({
             return;
         }
 
+        // Connection timeout — abort if server doesn't respond
+        connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
+
         const response = await fetch(`${apiUrl}/chat/completions`, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(requestBody),
             signal: controller ? controller.signal : undefined
         });
+
+        clearTimeout(connectTimer);
+        connectTimer = null;
 
         if (!response.ok) {
             let errText = "";
@@ -140,9 +143,16 @@ export async function executeRequest({
             let isFirst = true;
             let previousEffectiveText = "";
 
+            const resetStreamTimer = () => {
+                if (streamTimer) clearTimeout(streamTimer);
+                streamTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, STREAM_TIMEOUT);
+            };
+            resetStreamTimer();
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
+                resetStreamTimer();
 
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n');
@@ -232,6 +242,8 @@ export async function executeRequest({
                 }
             }
 
+            if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
+
             // Final processing for onComplete
             let finalReasoning = requestReasoning ? accumulatedReasoning : "";
             let finalText = fullText;
@@ -284,8 +296,18 @@ export async function executeRequest({
             if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
         }
     } catch (e) {
-        // If aborted but we already have partial text — save it as a successful response
         if (e.name === 'AbortError') {
+            if (timedOut) {
+                // Timeout-induced abort — treat as error, not user cancellation
+                if (fullText.length > 0) {
+                    if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: "Generation timed out" });
+                } else {
+                    if (onError) onError(new Error("Generation timed out — no response from server"));
+                }
+                return;
+            }
+
+            // User-initiated abort — save partial text if available
             if (fullText.length > 0) {
                 if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null);
             } else {
@@ -294,19 +316,18 @@ export async function executeRequest({
             return;
         }
 
-        // If network dropped (while backgrounded) but text was received — save it as a successful response
+        // Network error (connection abort, DNS failure, etc.) — save partial text cleanly
         if (fullText.length > 0) {
             console.warn("Network error during stream, saving partial response:", e);
-
             const errorMsg = e.message || "Stream Error";
-            const errorHtml = `<div class="msg-error-footer" style="margin-top: 10px; padding: 8px 12px; border-radius: 8px; background-color: #ff5252; color: white; font-size: 13px; font-family: monospace; white-space: pre-wrap; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"><svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;flex-shrink:0;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg><span>${errorMsg}</span></div>`;
-
-            if (onComplete) onComplete(cleanText(fullText) + errorHtml, requestReasoning ? accumulatedReasoning : null);
+            if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: errorMsg });
             return;
         }
 
         if (onError) onError(e);
     } finally {
+        if (connectTimer) clearTimeout(connectTimer);
+        if (streamTimer) clearTimeout(streamTimer);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (wakeLock) {
             try { wakeLock.release(); } catch (e) { }
@@ -314,12 +335,10 @@ export async function executeRequest({
 
         if (isAndroid) {
             await stopGenerationNotification();
-        } else {
-            // Signal Background Task to finish (iOS/Web)
-            isTaskFinished = true;
-            if (completeBackgroundTask) {
-                completeBackgroundTask();
-            }
+        } else if (isIos) {
+            try {
+                await BackgroundMode.disable();
+            } catch (e) {}
         }
     }
 }

@@ -55,5 +55,9 @@
 	<string>Allow access to your photo library to save images from the chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow access to your photo library to save and send images.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

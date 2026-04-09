@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
+        content="width=device-width, viewport-fit=cover, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=overlays-content">
     <title>Glaze</title>
     <style>
         /* Critical CSS: предотвращает белую вспышку и скрывает контент до загрузки */
@@ -19,6 +19,7 @@
             background-color: #19191a;
         }
     </style>
+    <script src="/src/webviewCheck.js"></script>
     <script>
         // Мгновенная установка фона в зависимости от темы (если сохранена)
         try {
@@ -35,25 +36,7 @@
 
 <body class="preload">
     <div id="app"></div>
-    <script type="module">
-        import { initGlobalErrorHandling } from './src/utils/errors.js';
-        initGlobalErrorHandling();
-    </script>
-    <script type="module">
-        import { createApp } from 'vue';
-        import App from './src/App.vue';
-        import './src/assets/styles.css';
-
-        const app = createApp(App);
-
-        // Vue-specific error handling
-        app.config.errorHandler = (err, vm, info) => {
-            console.error('[Vue Error]', err, info);
-            window.dispatchEvent(new CustomEvent('vue-error', { detail: { err, info } }));
-        };
-
-        app.mount('#app');
-    </script>
+    <script type="module" src="./src/main.js"></script>
 </body>
 
 </html>
