@@ -260,6 +260,7 @@
     "menu_image_viewer": "Просмотрщик изображений",
     "imggen_expand_image": "Развернуть картинку",
     "imggen_expand_image_hint": "Открыть картинку в полноэкранном режиме и посмотреть промпт",
+    "expand_image_hint": "Открыть картинку в полноэкранном режиме",
     "imggen_regenerate_hint": "Повторно сгенерировать картинку",
     "imggen_view_prompt": "Просмотреть промпт",
     "viewer_default": "Стандартный (2D)",
@@ -533,8 +534,10 @@
     "confirm_delete_greeting": "Удалить?",
     "label_active": "Активно",
     "label_lorebooks": "Лорбуки",
-    "label_global_enabled": "Включить глобально",
+    "label_global_enabled": "Включить для всех чатов",
     "label_global": "Глобально",
+    "lbc_section_characters": "Включить для персонажей",
+    "lbc_section_chats": "Включить для чатов",
     "no_items_found": "Ничего не найдено",
     "header_connections": "Привязки",
     "no_char_connections": "Нет привязок персонажей",
@@ -670,6 +673,8 @@
     "imggen_naistera_hint": "Узнать о Naistera",
     "imggen_naistera_hint_here": "здесь",
     "imggen_tag_hint": "ИИ должен вставлять теги для запуска генерации:",
+    "imggen_disabled": "Генерация картинок выключена",
+    "imggen_enable_btn": "Включить и сгенерировать",
     "imggen_status_on": "Вкл",
     "imggen_status_off": "Выкл",
     "imggen_refs": "Референсы",
@@ -683,5 +688,7 @@
     "imggen_image_context": "Контекст изображений",
     "imggen_image_context_enabled": "Отправлять предыдущие изображения как контекст",
     "imggen_image_context_desc": "Использовать последние сгенерированные изображения как визуальный референс для новых генераций",
-    "imggen_image_context_count": "Количество изображений в контексте"
+    "imggen_image_context_count": "Количество изображений в контексте",
+    "action_save_image": "Сохранить картинку",
+    "imggen_save_hint": "Сохранить эту картинку на ваше устройство"
 }

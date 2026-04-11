@@ -260,6 +260,7 @@
     "menu_image_viewer": "Image Viewer",
     "imggen_expand_image": "Expand image",
     "imggen_expand_image_hint": "Open the image in fullscreen and view the prompt",
+    "expand_image_hint": "Open the image in fullscreen",
     "imggen_regenerate_hint": "Re-generate the image",
     "imggen_view_prompt": "View prompt",
     "viewer_default": "Default (2D)",
@@ -527,8 +528,10 @@
     "confirm_delete_greeting": "Delete?",
     "label_active": "Active",
     "label_lorebooks": "Lorebooks",
-    "label_global_enabled": "Globally Enabled",
+    "label_global_enabled": "Enable for all chats",
     "label_global": "Global",
+    "lbc_section_characters": "Enable for characters",
+    "lbc_section_chats": "Enable for chats",
     "no_items_found": "No items available",
     "header_connections": "Bindings",
     "no_char_connections": "No character bindings",
@@ -664,6 +667,8 @@
     "imggen_naistera_hint": "Learn about Naistera",
     "imggen_naistera_hint_here": "here",
     "imggen_tag_hint": "AI must include tags to trigger generation:",
+    "imggen_disabled": "Image generation disabled",
+    "imggen_enable_btn": "Enable and generate",
     "imggen_status_on": "On",
     "imggen_status_off": "Off",
     "imggen_refs": "Reference images",
@@ -677,5 +682,7 @@
     "imggen_image_context": "Image Context",
     "imggen_image_context_enabled": "Send previous images as context",
     "imggen_image_context_desc": "Include recently generated images as visual reference for new generations",
-    "imggen_image_context_count": "Context image count"
+    "imggen_image_context_count": "Context image count",
+    "action_save_image": "Save Image",
+    "imggen_save_hint": "Save this image to your device"
 }
