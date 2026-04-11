@@ -189,7 +189,7 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                     <svg class="menu-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
                     <div class="menu-text">{{ t('menu_interface_settings') || 'Interface Settings' }}</div>
                     <div class="menu-value">
-                        <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: var(--text-light-gray);"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+                        <svg viewBox="0 0 24 24" style="width: 16px; height: 16px; fill: var(--text-gray);"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
                     </div>
                 </div>
 

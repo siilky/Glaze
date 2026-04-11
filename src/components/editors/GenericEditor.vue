@@ -386,20 +386,12 @@ function openFsEditor(field, index = -1) {
     text-transform: uppercase;
     color: var(--vk-blue);
     letter-spacing: 0.5px;
-    border-bottom: 1px solid rgba(0,0,0,0.03);
-}
-
-body.dark-theme .group-header {
-    border-bottom: 1px solid rgba(255,255,255,0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .settings-item {
     padding: 16px;
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-}
-
-body.dark-theme .settings-item {
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .settings-item:last-child {
@@ -459,9 +451,10 @@ select {
     width: 100%;
     padding: 10px 12px;
     border-radius: 10px;
-    border: 1px solid var(--border-color);
-    background-color: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.1);
+    background-color: rgba(0,0,0,0.2);
     font-size: 15px;
+    color: var(--text-black);
     transition: border-color 0.2s, background-color 0.2s;
 }
 
@@ -470,25 +463,8 @@ input[type="number"]:focus,
 textarea:focus,
 select:focus {
     border-color: var(--vk-blue);
-    background-color: #fff;
-    outline: none;
-}
-
-body.dark-theme input[type="text"],
-body.dark-theme input[type="number"],
-body.dark-theme textarea,
-body.dark-theme select {
-    background-color: rgba(0,0,0,0.2);
-    border-color: rgba(255,255,255,0.1);
-    color: var(--text-black);
-}
-
-body.dark-theme input[type="text"]:focus,
-body.dark-theme input[type="number"]:focus,
-body.dark-theme textarea:focus,
-body.dark-theme select:focus {
-    border-color: var(--vk-blue);
     background-color: rgba(0,0,0,0.4);
+    outline: none;
 }
 
 .greeting-list-container {
@@ -498,14 +474,10 @@ body.dark-theme select:focus {
 }
 
 .greeting-item {
-    background: rgba(0,0,0,0.03);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border-color);
     border-radius: 10px;
     padding: 10px;
-}
-
-body.dark-theme .greeting-item {
-    background: rgba(255,255,255,0.03);
 }
 
 .greeting-header {

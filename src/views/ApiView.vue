@@ -631,16 +631,12 @@ onBeforeUnmount(() => {
   color: var(--vk-blue);
   padding: 0 14px;
   border-radius: 16px;
-  background-color: var(--white);
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   overflow: hidden;
-}
-
-:global(body.dark-theme) .preset-selector {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .preset-selector:active {
@@ -677,31 +673,21 @@ onBeforeUnmount(() => {
 
 .error-window {
     display: block;
-    background-color: rgba(255, 242, 242, 0.9);
+    background-color: rgba(43, 14, 14, 0.85);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid #ff3b30;
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.1);
-    overflow: hidden;
-}
-
-body.dark-theme .error-window {
-    background-color: rgba(43, 14, 14, 0.85);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
 }
 
 .error-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: rgba(255, 59, 48, 0.1);
-    padding: 6px 12px;
-    border-bottom: 1px solid rgba(255, 59, 48, 0.2);
-}
-
-body.dark-theme .error-header {
     background-color: rgba(255, 59, 48, 0.2);
+    padding: 6px 12px;
     border-bottom: 1px solid rgba(255, 59, 48, 0.3);
 }
 
@@ -740,13 +726,9 @@ body.dark-theme .error-header {
     padding: 10px 12px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 12px;
-    color: #c42b2b;
+    color: #ffb3b3;
     white-space: pre-wrap;
     word-break: break-word;
-}
-
-body.dark-theme .error-content {
-    color: #ffb3b3;
 }
 
 .gen-sheet-header {

@@ -1,9 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
-import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, createPreset, getPresets, deletePreset, switchPreset, setThemeModeState, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, exportThemePreset, importThemePreset, updatePresetMeta, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity } from '@/core/states/themeState.js';
+import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, createPreset, getPresets, deletePreset, switchPreset, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, exportThemePreset, importThemePreset, updatePresetMeta, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity, setUiTextColor, setUiTextGrayColor } from '@/core/states/themeState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, setThemeMode, getThemeMode } from '@/core/config/APPSettings.js';
+import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { updateAppColors } from '@/core/services/ui.js';
 import ColorPickerSheet from '@/components/sheets/ColorPickerSheet.vue';
@@ -34,6 +34,8 @@ const onColorSelected = (color) => {
         case 'userItalic': setUserItalicColor(color); break;
         case 'charItalic': setCharItalicColor(color); break;
         case 'borderColor': setBorderColor(color); break;
+        case 'uiText': setUiTextColor(color); break;
+        case 'uiTextGray': setUiTextGrayColor(color); break;
     }
 };
 
@@ -42,7 +44,6 @@ const fontInput = ref(null);
 const chatFontInput = ref(null);
 const themeImportInput = ref(null);
 const presets = ref([]);
-const activeThemeMode = ref(getThemeMode());
 const activeTab = ref('general');
 const activeChatSubTab = ref('font');
 
@@ -53,20 +54,7 @@ const loadPresetsList = async () => {
 };
 
 onMounted(() => {
-    if (activeThemeMode.value === 'system') {
-        setTheme('dark');
-    } else {
-        setThemeModeState(activeThemeMode.value);
-    }
     loadPresetsList();
-});
-
-const themeModeLabel = computed(() => {
-    const map = {
-        'dark': t('theme_dark') || 'Dark',
-        'light': t('theme_light') || 'Light'
-    };
-    return map[activeThemeMode.value] || activeThemeMode.value;
 });
 
 const activePresetName = computed(() => {
@@ -140,19 +128,10 @@ const handleDeletePreset = (id) => {
 const handleApplyPreset = async (preset) => {
     await switchPreset(preset.id);
     updateAppColors();
-    activeThemeMode.value = getThemeMode();
     await loadPresetsList();
 };
 
-const openThemeModeSelector = () => {
-    showBottomSheet({
-        title: t('theme_title') || 'Theme',
-        items: [
-            { label: t('theme_dark') || 'Dark', onClick: () => setTheme('dark') },
-            { label: t('theme_light') || 'Light', onClick: () => setTheme('light') }
-        ]
-    });
-};
+
 
 const openPresetSelector = () => {
     const cardItems = presets.value.map(p => {
@@ -320,7 +299,6 @@ const onThemeFileSelected = async (event) => {
             const json = JSON.parse(e.target.result);
             const newPreset = await importThemePreset(json, file.name.replace(/\.json$/i, ''));
             updateAppColors();
-            activeThemeMode.value = getThemeMode();
             await loadPresetsList();
         } catch (err) {
             console.error('Error importing theme:', err);
@@ -337,14 +315,7 @@ const getPresetName = (id) => {
     return p ? p.name : (t('theme_preset_unknown') || 'Unknown');
 };
 
-const setTheme = async (mode) => {
-    setThemeMode(mode);
-    updateAppColors();
-    activeThemeMode.value = mode;
-    setThemeModeState(mode);
-    
-    closeBottomSheet();
-};
+
 
 const handleResetBackground = async () => {
     await setBackgroundImage(null);
@@ -417,14 +388,7 @@ const chatPreviewStyle = computed(() => ({
         </div>
 
         <div v-if="activeTab === 'general'">
-            <div class="menu-group">
-                <div class="section-header">{{ t('theme_title') || 'Theme' }}</div>
-                <div class="menu-item" @click="openThemeModeSelector">
-                    <svg class="menu-icon" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
-                    <div class="menu-text">{{ t('menu_theme') }}</div>
-                    <div class="menu-value">{{ themeModeLabel }}</div>
-                </div>
-            </div>
+
 
             <div v-if="themeState.activePresetId !== 'default'">
                 <div class="menu-group" style="display: block;">
@@ -473,6 +437,18 @@ const chatPreviewStyle = computed(() => ({
                         <div class="menu-text" style="flex:1;">{{ t('theme_ui_color') || 'UI Color' }}</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.uiColor || 'var(--bg-gray)', border: !themeState.uiColor ? '1px solid var(--text-gray)' : 'none' }">
                             <span v-if="!themeState.uiColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
+                        </div>
+                    </div>
+                    <div class="menu-item color-item" @click="openColorPicker('uiText', t('theme_ui_text_color') || 'Text Color', themeState.uiTextColor, PRESET_UI_COLORS, true)">
+                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_color') || 'Text Color' }}</div>
+                        <div class="color-pill" :style="{ backgroundColor: themeState.uiTextColor || 'var(--text-black)', border: !themeState.uiTextColor ? '1px solid var(--text-gray)' : 'none' }">
+                            <span v-if="!themeState.uiTextColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
+                        </div>
+                    </div>
+                    <div class="menu-item color-item" @click="openColorPicker('uiTextGray', t('theme_ui_text_gray_color') || 'Secondary Text Color', themeState.uiTextGrayColor, PRESET_UI_COLORS, true)">
+                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_gray_color') || 'Secondary Text Color' }}</div>
+                        <div class="color-pill" :style="{ backgroundColor: themeState.uiTextGrayColor || 'var(--text-gray)', border: !themeState.uiTextGrayColor ? '1px solid var(--text-gray)' : 'none' }">
+                            <span v-if="!themeState.uiTextGrayColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
                         </div>
                     </div>
                     <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 8px 16px;"></div>
@@ -802,9 +778,6 @@ const chatPreviewStyle = computed(() => ({
     min-height: 48px;
 }
 
-.viewStyle {
-}
-
 /* Tabs */
 .tabs-container {
     display: flex;
@@ -827,12 +800,6 @@ const chatPreviewStyle = computed(() => ({
 }
 
 .tab.active {
-    background: white;
-    color: var(--text-black);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-
-body.dark-theme .tab.active {
     background: rgba(255,255,255,0.1);
     color: white;
 }
@@ -909,7 +876,7 @@ body.dark-theme .tab.active {
 .msg-time {
     margin-left: auto;
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
 }
 
 .msg-body {
@@ -945,7 +912,7 @@ body.dark-theme .tab.active {
 
 .msg-index {
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: flex;
     align-items: center;
 }
@@ -1058,7 +1025,7 @@ body.dark-theme .tab.active {
     gap: 8px;
     margin-top: 4px;
     font-size: 11px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     opacity: 0.8;
 }
 
@@ -1109,6 +1076,7 @@ body.dark-theme .tab.active {
     overflow: hidden;
     border-radius: 50%;
     -webkit-mask-image: -webkit-radial-gradient(white, black);
+    mask-image: radial-gradient(white, black);
 }
 .custom-picker input {
     position: absolute;

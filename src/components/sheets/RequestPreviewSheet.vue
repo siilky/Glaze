@@ -126,7 +126,7 @@ defineExpose({ open });
 
 .segmented-control {
     display: flex;
-    background-color: rgba(0,0,0,0.05);
+    background-color: rgba(255,255,255,0.1);
     border-radius: 10px;
     padding: 4px;
     position: relative;
@@ -149,7 +149,7 @@ defineExpose({ open });
 
 .sub-tab-btn.active {
     background-color: transparent;
-    color: #fff;
+    color: var(--text-black);
     box-shadow: none;
 }
 
@@ -193,8 +193,8 @@ defineExpose({ open });
 }
 
 .param-item {
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.5));
-    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
     border-radius: 12px;
     padding: 10px;
     display: flex;
@@ -223,8 +223,8 @@ defineExpose({ open });
 }
 
 .message-card {
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.5));
-    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    background-color: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
     border-radius: 12px;
     overflow: hidden;
 }
@@ -235,7 +235,7 @@ defineExpose({ open });
     align-items: center;
     gap: 10px;
     cursor: pointer;
-    background-color: rgba(0,0,0,0.02);
+    background-color: rgba(255,255,255,0.02);
     user-select: none;
 }
 
@@ -259,15 +259,15 @@ defineExpose({ open });
     text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 4px;
-    background-color: #e0e0e0;
-    color: #555;
+    background-color: #424242;
+    color: #e0e0e0;
     flex-shrink: 0;
     align-self: flex-start;
 }
 
-.message-role.system { background-color: #e3f2fd; color: #1565c0; }
-.message-role.user { background-color: #f3e5f5; color: #7b1fa2; }
-.message-role.assistant { background-color: #e8f5e9; color: #2e7d32; }
+.message-role.system { background-color: #1565c0; color: #e3f2fd; }
+.message-role.user { background-color: #7b1fa2; color: #f3e5f5; }
+.message-role.assistant { background-color: #2e7d32; color: #e8f5e9; }
 
 .message-block-name {
     font-size: 11px;
@@ -298,8 +298,8 @@ defineExpose({ open });
 
 .message-body {
     padding: 12px;
-    border-top: 1px solid var(--border-color, rgba(0,0,0,0.05));
-    background-color: rgba(var(--ui-bg-rgb), 0.3);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background-color: rgba(0, 0, 0, 0.2);
 }
 
 .message-body pre {
@@ -315,18 +315,4 @@ defineExpose({ open });
     white-space: pre-wrap;
     word-break: break-all;
 }
-
-/* Dark Theme Support */
-:global(body.dark-theme) .sheet-title { color: #fff; }
-:global(body.dark-theme) .preview-container { color: #e1e3e6; }
-:global(body.dark-theme) .param-item { background-color: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
-:global(body.dark-theme) .segmented-control { background-color: rgba(255,255,255,0.1); }
-:global(body.dark-theme) .message-card { background-color: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); }
-:global(body.dark-theme) .message-header { background-color: rgba(255,255,255,0.02); }
-:global(body.dark-theme) .message-body { background-color: rgba(0,0,0,0.2); border-color: rgba(255,255,255,0.05); }
-:global(body.dark-theme) .message-role { background-color: #424242; color: #e0e0e0; }
-:global(body.dark-theme) .message-role.system { background-color: #1565c0; color: #e3f2fd; }
-:global(body.dark-theme) .message-role.user { background-color: #7b1fa2; color: #f3e5f5; }
-:global(body.dark-theme) .message-role.assistant { background-color: #2e7d32; color: #e8f5e9; }
-:global(body.dark-theme) .sub-tab-btn.active { background-color: transparent; color: #fff; }
 </style>

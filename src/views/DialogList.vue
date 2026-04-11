@@ -557,7 +557,7 @@ onUnmounted(() => {
     width: 20px;
     height: 20px;
     flex-shrink: 0;
-    fill: var(--text-light-gray);
+    fill: var(--text-gray);
     margin-left: 4px;
     transition: transform 0.2s ease;
 }

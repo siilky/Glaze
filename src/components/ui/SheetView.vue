@@ -429,12 +429,8 @@ onBeforeUnmount(() => {
 .sc-sheet-header-wrapper {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
-    flex-shrink: 0;
-}
-
-body.dark-theme .sc-sheet-header-wrapper {
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
 }
 
 .sc-sheet-header {
@@ -484,20 +480,9 @@ body.dark-theme .sc-sheet-header-wrapper {
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 20px));
     -webkit-backdrop-filter: blur(var(--element-blur, 20px));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    transition: all 0.2s ease;
-}
-
-.sc-header-btn:active {
-    transform: scale(0.9);
-    opacity: 0.8;
-}
-
-:global(body.dark-theme) .sc-header-btn {
-    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
 }
 
 .sc-header-btn.back-btn {
@@ -527,17 +512,13 @@ body.dark-theme .sc-sheet-header-wrapper {
     padding: 10px 8px;
     border: none;
     border-radius: 12px;
-    background: rgba(0, 0, 0, 0.03);
+    background: rgba(255, 255, 255, 0.04);
     color: var(--text-gray);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
     font-family: inherit;
-}
-
-body.dark-theme .sc-sheet-tab {
-    background: rgba(255, 255, 255, 0.04);
 }
 
 .sc-sheet-tab svg {

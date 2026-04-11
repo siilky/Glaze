@@ -499,7 +499,7 @@ async function finish() {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: var(--app-bg);
+    background-color: #000;
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -547,7 +547,7 @@ async function finish() {
     position: relative;
     width: 100%;
     height: 100%;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(50px);
     -webkit-backdrop-filter: blur(50px);
     padding: 24px;
@@ -609,7 +609,7 @@ async function finish() {
     font-size: 28px;
     font-weight: 800;
     margin-bottom: 12px;
-    color: var(--text-black, #000);
+    color: #fff;
     line-height: 1.3;
     padding: 4px 0;
     white-space: pre-line;
@@ -626,7 +626,7 @@ async function finish() {
 .welcome-title {
     font-size: 32px;
     font-weight: 800;
-    color: var(--text-black, #000);
+    color: #fff;
     line-height: 1.2;
     white-space: pre-line;
     text-align: left;
@@ -699,19 +699,19 @@ async function finish() {
     font-size: 20px;
     font-weight: 700;
     margin-bottom: 4px;
-    color: var(--text-black);
+    color: #fff;
 }
 
 .intro-text p {
     font-size: 15px;
     line-height: 1.5;
-    color: #818C99;
+    color: var(--text-gray);
 }
 
 .description {
     font-size: 16px;
     line-height: 1.5;
-    color: #818C99;
+    color: var(--text-gray);
     white-space: pre-line;
     max-width: 320px;
     margin: 0 auto;
@@ -763,76 +763,6 @@ async function finish() {
     transform: scale(0.96);
 }
 
-/* Dark Theme Support */
-:global(body.dark-theme) .onboarding-overlay {
-    background-color: #000;
-}
-:global(body.dark-theme) .title {
-    color: #fff;
-}
-:global(body.dark-theme) .welcome-title,
-:global(body.dark-theme) .intro-text h3 {
-    color: #fff;
-}
-:global(body.dark-theme) .onboarding-card {
-    background: rgba(0, 0, 0, 0.2);
-}
-
-/* Transitions */
-.slide-fade-enter-active,
-.slide-fade-leave-active {
-    transition: all 0.3s ease;
-}
-
-.slide-fade-enter-from {
-    opacity: 0;
-    transform: translateX(20px);
-}
-
-.slide-fade-leave-to {
-    opacity: 0;
-    transform: translateX(-20px);
-}
-
-/* API Status Styles */
-.section-header-flex {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.api-status-badge {
-    display: flex; 
-    align-items: center; 
-    font-size: 13px; 
-    cursor: pointer; 
-    padding: 4px 8px; 
-    border-radius: 12px; 
-    background: rgba(128, 128, 128, 0.1);
-    font-weight: normal;
-}
-
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: orange;
-    margin-right: 6px;
-}
-.status-dot.connecting { background-color: orange; }
-.status-dot.connected { background-color: #4CAF50; }
-.status-dot.failed { background-color: #ff4444; }
-
-.status-fade-enter-active,
-.status-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.status-fade-enter-from,
-.status-fade-leave-to {
-  opacity: 0;
-  transform: translateY(5px);
-}
-
 .nav-back-btn {
     position: absolute;
     top: calc(40px + var(--sat));
@@ -840,21 +770,13 @@ async function finish() {
     z-index: 20;
     background: none;
     border: none;
-    color: var(--text-black, #000);
+    color: #fff;
     padding: 8px;
     cursor: pointer;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-}
-.nav-back-btn svg {
-    width: 28px;
-    height: 28px;
-    fill: currentColor;
-}
-:global(body.dark-theme) .nav-back-btn {
-    color: #fff;
 }
 
 /* Avatar Card (matches GenericEditor style) */

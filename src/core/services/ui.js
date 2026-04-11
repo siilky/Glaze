@@ -210,30 +210,12 @@ export function rgbToHex(rgb) {
 }
 
 export async function updateAppColors(forceMainView = false) {
-    // Hardcoded palette to match CSS variables and avoid transition lag
-    const palette = {
-        light: {
-            body: '#ffffff'
-        },
-        dark: {
-            body: '#19191a'
-        }
+    const theme = {
+        body: '#19191a'
     };
-
-    let isDark = false;
-    const currentMode = getThemeMode();
-    if (currentMode === 'system') {
-        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    } else {
-        isDark = currentMode === 'dark';
-    }
-
-    const theme = isDark ? palette.dark : palette.light;
 
     // Apply to body to prevent flashes
     document.documentElement.style.setProperty('--app-bg', theme.body);
-    if (isDark) document.body.classList.add('dark-theme');
-    else document.body.classList.remove('dark-theme');
 
     // Apply UI Element Effects
     const elemOp = localStorage.getItem('gz_theme_elem_opacity');
@@ -242,18 +224,10 @@ export async function updateAppColors(forceMainView = false) {
     document.documentElement.style.setProperty('--element-opacity', elemOp !== null ? elemOp : '0.8');
     document.documentElement.style.setProperty('--element-blur', (elemBl !== null ? elemBl : '12') + 'px');
 
-    let meta = document.querySelector('meta[name="theme-color"]');
-    if (!meta) {
-        meta = document.createElement('meta');
-        meta.name = "theme-color";
-        document.head.appendChild(meta);
-    }
-    // Edge-to-edge makes the status bar transparent; color is controlled by the body/header background
-    meta.setAttribute('content', isDark ? '#19191a' : '#ffffff');
+    meta.setAttribute('content', '#19191a');
 
     try {
-        // DARK = light icons on dark background, LIGHT = dark icons on light background
-        await SafeArea.setSystemBarsStyle({ style: isDark ? 'DARK' : 'LIGHT' });
+        await SafeArea.setSystemBarsStyle({ style: 'DARK' });
     } catch (e) { console.warn('SafeArea SystemBars error', e); }
 }
 
@@ -273,28 +247,6 @@ export function initThemeToggle() {
     // Auto-detect system theme
     updateAppColors();
 
-    // System theme change listener
-    if (window.matchMedia) {
-        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        const handleChange = async () => {
-            if (getThemeMode() === 'system') {
-                updateAppColors();
-
-                const isDark = mediaQuery.matches;
-                const presetId = localStorage.getItem(isDark ? 'gz_theme_system_dark' : 'gz_theme_system_light');
-                if (presetId) {
-                    const presets = await getPresets();
-                    const preset = presets.find(p => p.id === presetId);
-                    if (preset) {
-                        await applyPreset(preset);
-                    }
-                }
-            }
-        };
-        if (mediaQuery.addEventListener) mediaQuery.addEventListener('change', handleChange);
-        else mediaQuery.addListener(handleChange);
-    }
-
     // Theme Selector
     const themeSelector = document.getElementById('theme-selector');
     const themeValue = document.getElementById('theme-value-text');
@@ -303,11 +255,9 @@ export function initThemeToggle() {
         if (!themeValue) return;
         const t = translations[currentLang.value] || {};
         const map = {
-            'system': t.theme_system || 'System',
-            'dark': t.theme_dark || 'Dark',
-            'light': t.theme_light || 'Light'
+            'dark': t.theme_dark || 'Dark'
         };
-        themeValue.textContent = map[getThemeMode()] || (t.theme_system || 'System');
+        themeValue.textContent = map[getThemeMode()] || (t.theme_dark || 'Dark');
     };
     updateThemeText();
 
@@ -318,9 +268,7 @@ export function initThemeToggle() {
             showBottomSheet({
                 title: t.theme_title || 'Theme',
                 items: [
-                    { label: t.theme_system || 'System', icon: getIcon('system'), onClick: () => { setThemeMode('system'); updateAppColors(); updateThemeText(); closeBottomSheet(); } },
-                    { label: t.theme_dark || 'Dark', icon: getIcon('dark'), onClick: () => { setThemeMode('dark'); updateAppColors(); updateThemeText(); closeBottomSheet(); } },
-                    { label: t.theme_light || 'Light', icon: getIcon('light'), onClick: () => { setThemeMode('light'); updateAppColors(); updateThemeText(); closeBottomSheet(); } }
+                    { label: t.theme_dark || 'Dark', icon: getIcon('dark'), onClick: () => { setThemeMode('dark'); updateAppColors(); updateThemeText(); closeBottomSheet(); } }
                 ]
             });
         });

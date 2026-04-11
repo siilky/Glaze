@@ -1,6 +1,4 @@
-import { reactive } from 'vue';
 import { db, queueDbWrite } from '@/utils/db.js';
-import { setThemeMode } from '@/core/config/APPSettings.js';
 
 export const themeState = reactive({
     accentColor: '#7996ce',
@@ -13,7 +11,6 @@ export const themeState = reactive({
     uiColor: null,
     customFontName: null,
     activePresetId: null,
-    themeMode: 'dark',
     chatLayout: 'default',
     userBubbleColor: null,
     charBubbleColor: null,
@@ -28,6 +25,8 @@ export const themeState = reactive({
     chatFontSize: 15,
     chatLetterSpacing: 0,
     chatFontName: null,
+    uiTextColor: null,
+    uiTextGrayColor: null,
     borderWidth: 1,
     borderColor: null,
     borderOpacity: 0.1,
@@ -62,7 +61,6 @@ export const DEFAULT_PRESET = {
     id: 'default',
     name: 'Default',
     author: '',
-    themeMode: 'dark',
     accentColor: '#7996ce',
     bgOpacity: 0.85,
     bgBlur: 0,
@@ -87,6 +85,8 @@ export const DEFAULT_PRESET = {
     chatLetterSpacing: 0,
     chatFont: null,
     chatFontName: null,
+    uiTextColor: null,
+    uiTextGrayColor: null,
     borderWidth: 1,
     borderColor: null,
     borderOpacity: 0.1,
@@ -114,10 +114,7 @@ async function saveStateToActivePreset() {
     if (index === -1) return;
 
     if (themeState.activePresetId === 'default') {
-        presets[index] = {
-            ...presets[index],
-            themeMode: themeState.themeMode
-        };
+        // Default preset stays same
     } else {
         const bgImage = themeState.hasBackgroundImage ? await db.get('gz_theme_bg') : null;
         const font = themeState.customFontName ? await db.get('gz_theme_font') : null;
@@ -128,7 +125,6 @@ async function saveStateToActivePreset() {
 
         presets[index] = {
             ...presets[index],
-            themeMode: themeState.themeMode,
             accentColor: themeState.accentColor,
             bgOpacity: themeState.bgOpacity,
             bgBlur: themeState.bgBlur,
@@ -153,6 +149,8 @@ async function saveStateToActivePreset() {
             chatLetterSpacing: themeState.chatLetterSpacing,
             chatFont: chatFontData,
             chatFontName: chatFontNameData,
+            uiTextColor: themeState.uiTextColor,
+            uiTextGrayColor: themeState.uiTextGrayColor,
             borderWidth: themeState.borderWidth,
             borderColor: themeState.borderColor,
             borderOpacity: themeState.borderOpacity,
@@ -257,10 +255,7 @@ export async function initTheme() {
         setUiColor(savedUiColor);
     }
 
-    const savedThemeMode = localStorage.getItem('gz_theme');
-    if (savedThemeMode) {
-        themeState.themeMode = savedThemeMode;
-    }
+
 
     const savedLayout = localStorage.getItem('gz_chat_layout');
     if (savedLayout) {
@@ -286,7 +281,6 @@ export async function initTheme() {
         id: Date.now().toString(),
         name: 'My Theme',
         author: '',
-        themeMode: themeState.themeMode,
         accentColor: themeState.accentColor,
         bgOpacity: themeState.bgOpacity,
         bgBlur: themeState.bgBlur,
@@ -311,6 +305,8 @@ export async function initTheme() {
         chatLetterSpacing: themeState.chatLetterSpacing,
         chatFont: null,
         chatFontName: null,
+        uiTextColor: themeState.uiTextColor,
+        uiTextGrayColor: themeState.uiTextGrayColor,
         borderWidth: themeState.borderWidth,
         borderColor: themeState.borderColor,
         borderOpacity: themeState.borderOpacity,
@@ -339,10 +335,7 @@ export function setAccentColor(color) {
     scheduleSave();
 }
 
-export function setThemeModeState(mode) {
-    themeState.themeMode = mode;
-    scheduleSave();
-}
+
 
 export function setUiColor(color) {
     themeState.uiColor = color;
@@ -547,7 +540,6 @@ export async function createPreset(name) {
         id: Date.now().toString(),
         name,
         author: '',
-        themeMode: themeState.themeMode,
         accentColor: PRESET_COLORS[0],
         bgOpacity: 0.85,
         bgBlur: 0,
@@ -558,6 +550,8 @@ export async function createPreset(name) {
         customFont: null,
         customFontName: null,
         chatLayout: themeState.chatLayout,
+        uiTextColor: null,
+        uiTextGrayColor: null,
         userBubbleColor: null,
         charBubbleColor: null,
         userQuoteColor: null,
@@ -639,16 +633,7 @@ export async function switchPreset(id) {
 export async function applyPreset(preset) {
     isApplyingPreset = true;
     try {
-        if (preset.themeMode) {
-            themeState.themeMode = preset.themeMode;
-            localStorage.setItem('gz_theme', preset.themeMode);
-            setThemeMode(preset.themeMode);
-            if (preset.themeMode === 'dark') {
-                document.body.classList.add('dark-theme');
-            } else {
-                document.body.classList.remove('dark-theme');
-            }
-        }
+        localStorage.setItem('gz_theme', 'dark');
         setAccentColor(preset.accentColor);
         setBgOpacity(preset.bgOpacity);
         setBgBlur(preset.bgBlur);
@@ -664,6 +649,8 @@ export async function applyPreset(preset) {
         setCharTextColor(preset.charTextColor || null);
         setUserItalicColor(preset.userItalicColor || null);
         setCharItalicColor(preset.charItalicColor || null);
+        setUiTextColor(preset.uiTextColor || null);
+        setUiTextGrayColor(preset.uiTextGrayColor || null);
         setUiFontSize(preset.uiFontSize !== undefined ? preset.uiFontSize : 15);
         setUiLetterSpacing(preset.uiLetterSpacing !== undefined ? preset.uiLetterSpacing : 0);
         setChatFontSize(preset.chatFontSize !== undefined ? preset.chatFontSize : 15);
@@ -804,6 +791,21 @@ function updateThemeStyles() {
         document.documentElement.style.removeProperty('--char-italic-color');
     }
 
+    // UI text colors
+    if (themeState.uiTextColor) {
+        document.documentElement.style.setProperty('--text-black', themeState.uiTextColor);
+        document.documentElement.style.setProperty('--text-dark-gray', themeState.uiTextColor);
+    } else {
+        document.documentElement.style.removeProperty('--text-black');
+        document.documentElement.style.removeProperty('--text-dark-gray');
+    }
+
+    if (themeState.uiTextGrayColor) {
+        document.documentElement.style.setProperty('--text-gray', themeState.uiTextGrayColor);
+    } else {
+        document.documentElement.style.removeProperty('--text-gray');
+    }
+
     // Remove legacy style injection if exists
     const uiStyle = document.getElementById('theme-ui-overrides');
     if (uiStyle) uiStyle.remove();
@@ -821,9 +823,8 @@ function updateThemeStyles() {
         const brgb = hexToRgb(themeState.borderColor);
         document.documentElement.style.setProperty('--border-color', `rgba(${brgb}, ${themeState.borderOpacity})`);
     } else {
-        // Use theme-aware default: white for dark, black for light
-        const isDark = document.body.classList.contains('dark-theme');
-        const defaultRgb = isDark ? '255, 255, 255' : '0, 0, 0';
+        // Use standard dark default (white)
+        const defaultRgb = '255, 255, 255';
         document.documentElement.style.setProperty('--border-color', `rgba(${defaultRgb}, ${themeState.borderOpacity})`);
     }
 
@@ -893,6 +894,18 @@ export function setCharTextColor(val) {
 
 export function setUserItalicColor(val) {
     themeState.userItalicColor = val;
+    updateThemeStyles();
+    scheduleSave();
+}
+
+export function setUiTextColor(val) {
+    themeState.uiTextColor = val;
+    updateThemeStyles();
+    scheduleSave();
+}
+
+export function setUiTextGrayColor(val) {
+    themeState.uiTextGrayColor = val;
     updateThemeStyles();
     scheduleSave();
 }
@@ -1006,7 +1019,6 @@ export async function exportThemePreset(presetId) {
         _type: 'silly_cradle_theme',
         name: preset.name,
         author: preset.author || '',
-        themeMode: preset.themeMode,
         accentColor: preset.accentColor,
         bgOpacity: preset.bgOpacity,
         bgBlur: preset.bgBlur,
@@ -1026,6 +1038,8 @@ export async function exportThemePreset(presetId) {
         uiLetterSpacing: preset.uiLetterSpacing,
         chatFontSize: preset.chatFontSize,
         chatLetterSpacing: preset.chatLetterSpacing,
+        uiTextColor: preset.uiTextColor || null,
+        uiTextGrayColor: preset.uiTextGrayColor || null,
         borderWidth: preset.borderWidth,
         borderColor: preset.borderColor,
         borderOpacity: preset.borderOpacity,
@@ -1052,7 +1066,6 @@ export async function importThemePreset(jsonData, defaultName) {
         id: Date.now().toString(),
         name: jsonData.name || defaultName || 'Imported Theme',
         author: jsonData.author || '',
-        themeMode: jsonData.themeMode || 'dark',
         accentColor: jsonData.accentColor || PRESET_COLORS[0],
         bgOpacity: jsonData.bgOpacity !== undefined ? jsonData.bgOpacity : 0.85,
         bgBlur: jsonData.bgBlur !== undefined ? jsonData.bgBlur : 0,
@@ -1077,6 +1090,8 @@ export async function importThemePreset(jsonData, defaultName) {
         chatLetterSpacing: jsonData.chatLetterSpacing !== undefined ? jsonData.chatLetterSpacing : 0,
         chatFont: jsonData.chatFont || null,
         chatFontName: jsonData.chatFontName || null,
+        uiTextColor: jsonData.uiTextColor || null,
+        uiTextGrayColor: jsonData.uiTextGrayColor || null,
         borderWidth: jsonData.borderWidth !== undefined ? jsonData.borderWidth : 1,
         borderColor: jsonData.borderColor || null,
         borderOpacity: jsonData.borderOpacity !== undefined ? jsonData.borderOpacity : 0.1,
