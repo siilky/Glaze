@@ -20,6 +20,7 @@ export const DEFAULT_PRESETS = {
         author: '',
         image: '',
         reasoningEnabled: false,
+        reasoningEffort: 'medium',
         impersonationPrompt: '',
         reasoningStart: '<think>',
         reasoningEnd: '</think>',

@@ -27,7 +27,8 @@ const apiSettings = reactive({
     topP: 0.9,
     stream: true,
     autoHideImages: false,
-    autoHideImagesN: 1
+    autoHideImagesN: 1,
+    reasoningEffort: 'medium'
 });
 
 const showApiKey = ref(false);
@@ -86,6 +87,7 @@ function loadApiSettings() {
     apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
     apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
     apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    apiSettings.reasoningEffort = localStorage.getItem('gz_api_reasoning_effort') || 'medium';
 }
 
 function saveApiSetting(key, value) {
@@ -107,7 +109,8 @@ function saveApiSetting(key, value) {
             'gz_api_topp': 'topp',
             'gz_api_stream': 'stream',
             'gz_api_auto_hide_images': 'auto_hide_images',
-            'gz_api_auto_hide_images_n': 'auto_hide_images_n'
+            'gz_api_auto_hide_images_n': 'auto_hide_images_n',
+            'gz_api_reasoning_effort': 'reasoning_effort'
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -193,7 +196,8 @@ function createNewApiPreset() {
                     topp: apiSettings.topP,
                     stream: apiSettings.stream,
                     auto_hide_images: apiSettings.autoHideImages,
-                    auto_hide_images_n: apiSettings.autoHideImagesN
+                    auto_hide_images_n: apiSettings.autoHideImagesN,
+                    reasoning_effort: apiSettings.reasoningEffort
                 };
 
                 apiPresets.value.push(newPreset);
@@ -222,6 +226,7 @@ function applyApiPreset(p) {
     
     apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
     apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
+    apiSettings.reasoningEffort = p.reasoning_effort || 'medium';
     
     saveApiSetting('api-endpoint', p.endpoint);
     saveApiSetting('api-key', p.key);
@@ -233,6 +238,7 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_stream', p.stream);
     saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
     saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
+    saveApiSetting('gz_api_reasoning_effort', apiSettings.reasoningEffort);
     
     checkConnection();
 }
@@ -498,6 +504,14 @@ onBeforeUnmount(() => {
                             <input type="number" v-model.number="apiSettings.autoHideImagesN" @input="onApiInput('gz_api_auto_hide_images_n', $event.target.value)" min="1">
                         </div>
                     </Transition>
+                    <div class="settings-item">
+                        <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
+                        <select v-model="apiSettings.reasoningEffort" @change="onApiInput('gz_api_reasoning_effort', $event.target.value)" class="settings-select">
+                            <option value="low">{{ t('reasoning_effort_low') || 'Low' }}</option>
+                            <option value="medium">{{ t('reasoning_effort_medium') || 'Medium' }}</option>
+                            <option value="high">{{ t('reasoning_effort_high') || 'High' }}</option>
+                        </select>
+                    </div>
                 </div>
         </div>
     </SheetView>

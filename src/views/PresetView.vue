@@ -505,6 +505,7 @@ async function loadPresets() {
     for (const key in presetState.presets) {
         const preset = presetState.presets[key];
         if (preset.reasoningEnabled === undefined) preset.reasoningEnabled = false;
+        if (preset.reasoningEffort === undefined) preset.reasoningEffort = 'medium';
         if (preset.parseInlineReasoning === undefined) preset.parseInlineReasoning = false;
         if (preset.mergePrompts === undefined) preset.mergePrompts = false;
         if (preset.mergeRole === undefined) preset.mergeRole = 'system';
@@ -601,6 +602,7 @@ function createNewPreset() {
                     image: '',
                     impersonationPrompt: '',
                     reasoningEnabled: false,
+                    reasoningEffort: 'medium',
                     parseInlineReasoning: false,
                     reasoningStart: '<think>',
                     reasoningEnd: '</think>',
@@ -2099,6 +2101,14 @@ onBeforeUnmount(() => {
                                 <div class="settings-desc">{{ t('desc_reasoning') || 'Shows model native reasoning' }}</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.reasoningEnabled" class="vk-switch">
+                            </div>
+                            <div class="settings-item" v-if="currentPreset.reasoningEnabled">
+                                <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
+                                <select v-model="currentPreset.reasoningEffort" class="settings-select">
+                                    <option value="low">{{ t('reasoning_effort_low') || 'Low' }}</option>
+                                    <option value="medium">{{ t('reasoning_effort_medium') || 'Medium' }}</option>
+                                    <option value="high">{{ t('reasoning_effort_high') || 'High' }}</option>
+                                </select>
                             </div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">

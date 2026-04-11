@@ -113,7 +113,7 @@ export async function generateChatResponse({
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     let apiConfig = getEffectiveApiConfig();
-    let { apiKey, apiUrl, model, stream, requestReasoning, temp, topP, maxTokens, contextSize } = apiConfig;
+    let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -154,6 +154,9 @@ export async function generateChatResponse({
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         requestReasoning = activePreset.reasoningEnabled;
+    }
+    if (activePreset && activePreset.reasoningEffort) {
+        reasoningEffort = activePreset.reasoningEffort;
     }
 
     // Get Persona object for macros
@@ -248,6 +251,7 @@ export async function generateChatResponse({
         temperature: temp,
         top_p: topP,
         stream: stream,
+        reasoning_effort: reasoningEffort || 'medium'
     };
 
     if (maxTokens > 0) {
@@ -258,20 +262,6 @@ export async function generateChatResponse({
         requestBody.stop = [stopString];
     }
 
-    // Google Gemini specific reasoning config
-    if (apiUrl.includes('generativelanguage.googleapis.com')) {
-        if (requestReasoning) {
-            requestBody.extra_body = {
-                google: {
-                    thinking_config: {
-                        include_thoughts: true
-                    }
-                }
-            };
-        }
-    } else {
-        requestBody.include_reasoning = requestReasoning; // OpenRouter/DeepSeek specific
-    }
 
     // Save for preview
     lastPrompt = JSON.parse(JSON.stringify(requestBody));
