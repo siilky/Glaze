@@ -28,6 +28,7 @@ const apiSettings = reactive({
     stream: true,
     autoHideImages: false,
     autoHideImagesN: 1,
+    reasoningEnabled: false,
     reasoningEffort: 'medium'
 });
 
@@ -87,6 +88,7 @@ function loadApiSettings() {
     apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
     apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
     apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    apiSettings.reasoningEnabled = localStorage.getItem('gz_api_request_reasoning') === 'true';
     apiSettings.reasoningEffort = localStorage.getItem('gz_api_reasoning_effort') || 'medium';
 }
 
@@ -110,6 +112,7 @@ function saveApiSetting(key, value) {
             'gz_api_stream': 'stream',
             'gz_api_auto_hide_images': 'auto_hide_images',
             'gz_api_auto_hide_images_n': 'auto_hide_images_n',
+            'gz_api_request_reasoning': 'reasoning_enabled',
             'gz_api_reasoning_effort': 'reasoning_effort'
         };
         if (map[key]) {
@@ -527,9 +530,20 @@ onBeforeUnmount(() => {
                             <input type="number" v-model.number="apiSettings.autoHideImagesN" @input="onApiInput('gz_api_auto_hide_images_n', $event.target.value)" min="1">
                         </div>
                     </Transition>
-                    <div class="settings-item">
+                </div>
+
+                <div class="menu-group">
+                    <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_show_reasoning') || 'Show Native Reasoning' }}</label>
+                            <div class="settings-desc">{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.reasoningEnabled" @change="onApiInput('gz_api_request_reasoning', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <div class="settings-item" @click="openReasoningEffortSelector">
                         <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
-                        <div class="clickable-selector" @click="openReasoningEffortSelector">
+                        <div class="clickable-selector">
                             <span>{{ t('reasoning_effort_' + apiSettings.reasoningEffort) || apiSettings.reasoningEffort }}</span>
                             <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                         </div>

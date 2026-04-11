@@ -2119,20 +2119,6 @@ onBeforeUnmount(() => {
                             <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
-                                <label>{{ t('label_reasoning') || 'Request Native Reasoning' }}</label>
-                                <div class="settings-desc">{{ t('desc_reasoning') || 'Shows model native reasoning' }}</div>
-                                </div>
-                                <input type="checkbox" v-model="currentPreset.reasoningEnabled" class="vk-switch">
-                            </div>
-                            <div class="settings-item" v-if="currentPreset.reasoningEnabled" @click="openReasoningEffortSelector">
-                                <label>{{ t('label_reasoning_effort') || 'Reasoning Effort' }}</label>
-                                <div class="clickable-selector">
-                                    <span>{{ t('reasoning_effort_' + currentPreset.reasoningEffort) || currentPreset.reasoningEffort }}</span>
-                                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                                </div>
-                            </div>
-                            <div class="settings-item-checkbox">
-                                <div class="settings-text-col">
                                 <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }}</label>
                                 <div class="settings-desc">{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}</div>
                                 </div>
