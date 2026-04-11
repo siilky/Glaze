@@ -525,7 +525,7 @@ defineExpose({
     right: 0;
     bottom: 0;
     background: linear-gradient(to bottom, 
-        rgba(20, 20, 22, 0.7) 0%, 
+        rgba(20, 20, 22, 0.85) 0%, 
         rgba(20, 20, 22, 0) 100%
     );
     backdrop-filter: blur(12px);
