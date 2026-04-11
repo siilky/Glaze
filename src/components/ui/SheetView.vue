@@ -304,7 +304,9 @@ onBeforeUnmount(() => {
                             </button>
                         </div>
                         
-                        <slot name="header-bottom"></slot>
+                        <div class="sc-sheet-header-bottom" v-if="$slots['header-bottom']">
+                            <slot name="header-bottom"></slot>
+                        </div>
                     </div>
                     
                     <!-- Slot for a custom header (title, buttons) -->
@@ -384,10 +386,47 @@ onBeforeUnmount(() => {
 
 
 .sheet-header-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     flex-shrink: 0;
     touch-action: none;
-    cursor: grab;
-    background-color: var(--app-bg);
+    z-index: 10;
+    padding-bottom: 12px;
+    pointer-events: none;
+}
+
+.sheet-header-area::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+        rgba(var(--ui-bg-rgb), 0.85) 0%, 
+        rgba(var(--ui-bg-rgb), 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 65%, 
+        rgba(0, 0, 0, 0.6) 85%,
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 65%, 
+        rgba(0, 0, 0, 0.6) 85%,
+        transparent 100%
+    );
+    z-index: -1;
+}
+
+.sheet-header-area > * {
+    pointer-events: auto;
 }
 
 .sheet-handle-bar {
@@ -399,7 +438,6 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
     cursor: grab;
     touch-action: none;
-    background-color: var(--app-bg);
 }
 
 .sheet-view-content.fit-content .sheet-handle-bar {
@@ -420,6 +458,28 @@ onBeforeUnmount(() => {
     position: relative;
     display: flex;
     flex-direction: column;
+    padding-top: 80px;
+    scroll-padding-top: 80px;
+}
+
+.sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body,
+.sheet-view-content:has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 140px;
+    scroll-padding-top: 140px;
+}
+
+.sheet-view-content:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 200px;
+    scroll-padding-top: 200px;
+}
+
+.sheet-view-body::-webkit-scrollbar-track {
+    margin-top: 80px;
+}
+
+.sheet-view-content:has(.sc-sheet-tabs) .sheet-view-body::-webkit-scrollbar-track,
+.sheet-view-content:has(.sc-sheet-header-bottom) .sheet-view-body::-webkit-scrollbar-track {
+    margin-top: 140px;
 }
 
 .sheet-view-body .active-view  {
@@ -429,7 +489,6 @@ onBeforeUnmount(() => {
 .sc-sheet-header-wrapper {
     display: flex;
     flex-direction: column;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     flex-shrink: 0;
 }
 

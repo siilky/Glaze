@@ -232,25 +232,19 @@ defineExpose({ open });
 
 <template>
     <SheetView ref="sheet" :title="t('imggen_title') || 'Image Generation'">
-        <div class="gen-sheet-body">
-
-            <!-- Enable toggle -->
-            <div class="menu-group">
-                <div class="settings-item-checkbox">
-                    <div class="settings-text-col">
-                        <label>{{ t('imggen_enabled') || 'Enable image generation' }}</label>
-                        <div class="settings-desc">{{ t('imggen_enabled_desc') || 'Auto-generate images from AI tags' }}</div>
-                    </div>
-                    <input type="checkbox" v-model="settings.enabled" class="vk-switch">
-                </div>
+        <template #header-right>
+            <div class="header-toggle" style="align-items: center; display: flex; padding-right: 8px;">
+                 <input type="checkbox" v-model="settings.enabled" class="vk-switch">
             </div>
+        </template>
 
+        <div class="gen-sheet-body">
             <template v-if="settings.enabled">
 
                 <!-- Connection -->
                 <div class="menu-group">
                     <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
-                        <span>{{ t('section_connection') || 'Connection' }}</span>
+                        <span class="section-header" style="margin: 0; padding: 0; background: none; border: none; box-shadow: none;">{{ t('section_connection') || 'Connection' }}</span>
                     </ConnectionStatus>
 
                     <!-- API Type selector row -->
@@ -488,10 +482,7 @@ defineExpose({ open });
 
 <style scoped>
 .gen-sheet-body {
-    flex: 1;
-    overflow-y: auto;
     position: relative;
-    padding-top: 8px;
 }
 
 .naistera-hint-box {

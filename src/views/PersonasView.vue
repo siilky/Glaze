@@ -105,8 +105,6 @@ onMounted(() => {
 
 .view-content {
     padding: 16px;
-    overflow-y: auto;
-    height: 100%;
     box-sizing: border-box;
 }
 

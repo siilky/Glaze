@@ -1912,6 +1912,45 @@ onBeforeUnmount(() => {
 
 <template>
     <SheetView ref="sheet" :title="headerState.title" :show-back="headerState.showBack" :actions="headerState.actions" @back="goBackFromEditor" @close="flushPresetSave">
+        <template #header-bottom v-if="editingPresetId && !isEditingBlock">
+            <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
+                <div class="dashboard-edit-header">
+                    <div class="active-row-content">
+                        <div class="active-name-group">
+                            <div class="active-preset-name-wrapper">
+                                <div class="active-preset-name">{{ currentPreset.name || 'Default' }}</div>
+                            </div>
+                            <div v-if="currentPreset.author" class="active-preset-author">by {{ currentPreset.author }}</div>
+                        </div>
+                        
+                        <!-- Consolidate Actions Top Right -->
+                        <div class="action-icons-corner">
+                            <div class="header-dots-btn" @click.stop="openPresetOptionsMenu">
+                                <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-utils-row">
+                    <div class="utils-left">
+                        <div v-if="stashedBlocks.length > 0" 
+                             class="header-stash-btn" 
+                             @click.stop="openStashSheet"
+                             :title="t('stash') || 'Stash'">
+                            <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>
+                            <span class="stash-count-dot">{{ stashedBlocks.length }}</span>
+                        </div>
+                    </div>
+                    <div class="utils-right">
+                        <div class="active-tokens">
+                            <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                            <span>{{ displayedEditingTokens }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
         <div class="gen-sheet-body" ref="genSheetBodyRef">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
         <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId">
@@ -1974,46 +2013,8 @@ onBeforeUnmount(() => {
         <!-- ═══ EDITOR VIEW (existing dashboard) ═══ -->
         <div class="prompt-builder-wrapper" v-if="!isEditingBlock && editingPresetId">
 
-                <!-- Consolidated Dashboard and Blocks Container -->
-                <div class="preset-dashboard" :class="{ 'has-background': !!currentPreset.image }" :style="currentPreset.image ? { 'background-image': 'url(' + currentPreset.image + ')' } : {}">
-                    <div class="dashboard-edit-header">
-                        <div class="active-row-content">
-                            <div class="active-name-group">
-                                <div class="active-preset-name-wrapper">
-                                    <div class="active-preset-name">{{ currentPreset.name || 'Default' }}</div>
-                                </div>
-                                <div v-if="currentPreset.author" class="active-preset-author">by {{ currentPreset.author }}</div>
-                            </div>
-                            
-                            <!-- Consolidate Actions Top Right -->
-                            <div class="action-icons-corner">
-                                <div class="header-dots-btn" @click.stop="openPresetOptionsMenu">
-                                    <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="dashboard-utils-row">
-                        <div class="utils-left">
-                            <div v-if="stashedBlocks.length > 0" 
-                                 class="header-stash-btn" 
-                                 @click.stop="openStashSheet"
-                                 :title="t('stash') || 'Stash'">
-                                <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>
-                                <span class="stash-count-dot">{{ stashedBlocks.length }}</span>
-                            </div>
-                        </div>
-                        <div class="utils-right">
-                            <div class="active-tokens">
-                                <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                <span>{{ displayedEditingTokens }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Integrated Block List directly below hierarchy -->
-                    <div class="prompt-blocks-area">
+                <!-- Consolidated Blocks Container -->
+                <div class="prompt-blocks-area">
                     <TransitionGroup name="block-list" tag="div">
                         <div v-for="block in activeBlocks" :key="block.id" 
                              class="prompt-block"
@@ -2062,7 +2063,6 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     </div> <!-- End prompt-blocks-area -->
-                </div> <!-- End preset-dashboard -->
 
                 <!-- Advanced Settings Section -->
                 <div class="advanced-settings-toggle" @click="showAdvancedSettings = !showAdvancedSettings">
@@ -2527,7 +2527,7 @@ onBeforeUnmount(() => {
 .header-btn svg { width: 24px; height: 24px; fill: currentColor; }
 
 .gen-sheet-tabs { padding: 10px 16px; flex-shrink: 0; }
-.gen-sheet-body { flex: 1; overflow-y: auto; position: relative;}
+.gen-sheet-body { position: relative; }
 
 .clickable-selector {
     display: flex;

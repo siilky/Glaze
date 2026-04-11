@@ -226,20 +226,22 @@ defineExpose({ open });
 
 <template>
     <SheetView ref="sheet" :title="sheetTitle" :show-back="view !== 'categories'" :z-index="20000" :view-mode="viewMode" @back="goBack">
+        <template #header-bottom v-if="view === 'categories'">
+            <div class="gl-search-wrap">
+                <div class="gl-search-bar">
+                    <svg class="gl-search-icon" viewBox="0 0 24 24"><path d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+                    <input v-model="searchQuery" class="gl-search-input" type="search" :placeholder="t('search') || 'Search...'"/>
+                    <button v-if="isSearching" class="gl-search-clear" @click="searchQuery = ''">
+                        <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+            </div>
+        </template>
 
         <div class="gl-view-wrapper view-content-wrapper">
             <Transition :name="navDirection === 'forward' ? 'gl-fwd' : 'gl-back'" mode="out-in">
 
                 <div v-if="view === 'categories'" key="categories" class="gl-cats-view">
-                    <div class="gl-search-wrap">
-                        <div class="gl-search-bar">
-                            <svg class="gl-search-icon" viewBox="0 0 24 24"><path d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
-                            <input v-model="searchQuery" class="gl-search-input" type="search" :placeholder="t('search') || 'Search...'"/>
-                            <button v-if="isSearching" class="gl-search-clear" @click="searchQuery = ''">
-                                <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                            </button>
-                        </div>
-                    </div>
                     <div v-if="viewMode" class="gl-drawer-hint">
                         <span>{{ t('hint_glossary_drawer') }}</span>&nbsp;<svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>&nbsp;<span>{{ t('hint_glossary_drawer_suffix') }}</span>
                     </div>
@@ -341,8 +343,8 @@ defineExpose({ open });
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px;
     padding: 0 12px;
     height: 44px;
