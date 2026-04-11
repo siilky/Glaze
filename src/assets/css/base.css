@@ -1,5 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
+html {
+    height: 100%;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -188,7 +192,7 @@ body.preload * {
     transition: none !important;
 }
 
-.api-status {
+.conn-badge {
     background: rgba(255, 255, 255, 0.15) !important;
     /* Более отчетливый фон */
     color: var(--text-black);
@@ -355,7 +359,7 @@ body.has-custom-background .chat-container {
 }
 
 .preset-selector,
-.api-status {
+.conn-badge {
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 12px));
     -webkit-backdrop-filter: blur(var(--element-blur, 12px));

@@ -4,7 +4,8 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences } from '@/core/services/imageGenService.js';
+import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, checkImageGenConnection } from '@/core/services/imageGenService.js';
+import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -13,6 +14,28 @@ const settings = ref(getImageGenSettings());
 const models = ref([]);
 const isFetchingModels = ref(false);
 const fetchError = ref('');
+
+// Connection status
+const apiStatus = ref('idle'); // idle | connecting | connected | failed
+const errorMessage = ref('');
+let checkDebounceTimer = null;
+
+async function checkConnection() {
+    apiStatus.value = 'connecting';
+    errorMessage.value = '';
+    try {
+        await checkImageGenConnection();
+        apiStatus.value = 'connected';
+    } catch (e) {
+        apiStatus.value = 'failed';
+        errorMessage.value = e.message || 'Connection failed';
+    }
+}
+
+function scheduleCheck() {
+    if (checkDebounceTimer) clearTimeout(checkDebounceTimer);
+    checkDebounceTimer = setTimeout(checkConnection, 900);
+}
 
 // Additional references
 const refImageInput = ref(null);
@@ -23,6 +46,7 @@ const open = () => {
     models.value = [];
     fetchError.value = '';
     sheet.value?.open();
+    if (settings.value.enabled) checkConnection();
 };
 
 const save = () => {
@@ -30,6 +54,12 @@ const save = () => {
 };
 
 watch(settings, save, { deep: true });
+
+// Re-check connection when connectivity-relevant fields change
+watch(
+    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.enabled],
+    ([, , , enabled]) => { if (enabled) scheduleCheck(); else { apiStatus.value = 'idle'; errorMessage.value = ''; } }
+);
 
 const onFetchModels = async () => {
     isFetchingModels.value = true;
@@ -219,7 +249,9 @@ defineExpose({ open });
 
                 <!-- Connection -->
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_connection') || 'Connection' }}</div>
+                    <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                        <span>{{ t('section_connection') || 'Connection' }}</span>
+                    </ConnectionStatus>
 
                     <!-- API Type selector row -->
                     <div class="settings-item selector-row" @click="openApiTypeSelector">
@@ -721,4 +753,6 @@ defineExpose({ open });
     color: var(--vk-blue);
     word-break: break-all;
 }
+
+
 </style>

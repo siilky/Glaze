@@ -37,6 +37,18 @@ function sanitizeHeaderValue(val) {
     return String(val || '').replace(/[^\x20-\x7E]/g, '').trim();
 }
 
+/**
+ * fetch() wrapper that aborts after `timeoutMs` milliseconds.
+ * Converts AbortError to a user-friendly "Request timed out" error.
+ */
+function fetchWithTimeout(url, options = {}, timeoutMs = 300000) {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => ctrl.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: ctrl.signal })
+        .catch(e => { throw e.name === 'AbortError' ? new Error('Request timed out') : e; })
+        .finally(() => clearTimeout(id));
+}
+
 export function getImageGenSettings() {
     return {
         enabled: localStorage.getItem(SETTINGS_KEY.enabled) === 'true',
@@ -220,7 +232,7 @@ async function generateImageOpenAI(prompt, options, settings) {
         body.image = options.previousImages[0];
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${settings.apiKey}`,
@@ -281,7 +293,7 @@ async function generateImageGemini(prompt, options, settings) {
         },
     };
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${settings.apiKey}`,
@@ -334,7 +346,7 @@ async function generateImageNaistera(prompt, options, settings) {
         body.reference_images = referenceImages.slice(0, MAX_NAISTERA_REFS);
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${settings.apiKey}`,
@@ -400,9 +412,9 @@ export async function fetchImageModels() {
     if (!settings.endpoint || !settings.apiKey) return [];
 
     const url = `${settings.endpoint.replace(/\/$/, '')}/v1/models`;
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         headers: { 'Authorization': `Bearer ${settings.apiKey}` },
-    });
+    }, 10000);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
@@ -417,6 +429,41 @@ export async function fetchImageModels() {
             if (VID_KW.some(k => lower.includes(k))) return false;
             return IMG_KW.some(k => lower.includes(k));
         });
+}
+
+/**
+ * Lightweight connection test for the configured image generation endpoint.
+ * Uses a short timeout (10s) — not a full generation.
+ */
+export async function checkImageGenConnection() {
+    const settings = getImageGenSettings();
+    if (!settings.apiKey) throw new Error('API key not configured');
+
+    if (settings.apiType === 'openai') {
+        if (!settings.endpoint) throw new Error('Endpoint not configured');
+        const url = `${settings.endpoint.replace(/\/$/, '')}/v1/models`;
+        const response = await fetchWithTimeout(url, {
+            headers: { 'Authorization': `Bearer ${settings.apiKey}` },
+        }, 10000);
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${txt.slice(0, 200)}`);
+        }
+    } else if (settings.apiType === 'gemini') {
+        if (!settings.endpoint) throw new Error('Endpoint not configured');
+        const url = `${settings.endpoint.replace(/\/$/, '')}/v1beta/models`;
+        const response = await fetchWithTimeout(url, {
+            headers: { 'Authorization': `Bearer ${settings.apiKey}` },
+        }, 10000);
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${txt.slice(0, 200)}`);
+        }
+    } else if (settings.apiType === 'naistera') {
+        const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '');
+        const response = await fetchWithTimeout(base, {}, 10000);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    }
 }
 
 // ---- Image HTML Builders ----
