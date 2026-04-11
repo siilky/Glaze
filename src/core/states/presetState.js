@@ -45,6 +45,8 @@ export async function initPresetState() {
     if (presetState.initialized) return;
     logger.debug('[presetState] Initializing...');
 
+    let didBackfillCreatedAt = false;
+
     try {
         const savedPresets = localStorage.getItem('silly_cradle_presets');
         if (savedPresets) {
@@ -63,6 +65,22 @@ export async function initPresetState() {
                     presetState.presets[key] = JSON.parse(JSON.stringify(DEFAULT_PRESETS[key]));
                 }
             }
+        }
+
+        // Backfill createdAt for stable sorting by "date added"
+        const now = Date.now();
+        for (const id in presetState.presets) {
+            const preset = presetState.presets[id];
+            if (!preset || preset.createdAt !== undefined) continue;
+
+            // Try to derive from our historical id scheme: Date.now().toString(36)
+            const derived = Number.parseInt(String(id), 36);
+            if (Number.isFinite(derived) && derived > 0 && derived <= now + 1000) {
+                preset.createdAt = derived;
+            } else {
+                preset.createdAt = 0;
+            }
+            didBackfillCreatedAt = true;
         }
 
         const savedId = localStorage.getItem('silly_cradle_current_preset_id');
@@ -88,6 +106,11 @@ export async function initPresetState() {
 
     presetState.initialized = true;
     logger.debug('[presetState] Initialized');
+
+    // Persist one-time migrations
+    if (didBackfillCreatedAt) {
+        savePresets();
+    }
 }
 
 export function savePresets() {

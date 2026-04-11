@@ -213,12 +213,7 @@ function openLevelSelector(level) {
         });
     }
 
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     entries.forEach(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -257,12 +252,7 @@ function openLevelSelector(level) {
 }
 
 function openPresetEditorSelector() {
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     const cardItems = entries.map(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -450,15 +440,30 @@ const getPresetWeight = (id, preset) => {
     return 0;
 };
 
+const getPresetCreatedAt = (id, preset) => {
+    if (!preset) return 0;
+    if (typeof preset.createdAt === 'number' && Number.isFinite(preset.createdAt)) return preset.createdAt;
+
+    const derived = Number.parseInt(String(id), 36);
+    return Number.isFinite(derived) ? derived : 0;
+};
+
+const comparePresetEntries = (a, b) => {
+    const wA = getPresetWeight(a[0], a[1]);
+    const wB = getPresetWeight(b[0], b[1]);
+    if (wA !== wB) return wA - wB;
+
+    const tA = getPresetCreatedAt(a[0], a[1]);
+    const tB = getPresetCreatedAt(b[0], b[1]);
+    if (tA !== tB) return tA - tB; // oldest first
+
+    return (a[1]?.name || '').localeCompare(b[1]?.name || '');
+};
+
 // Sorted preset entries for the selector list
 const sortedPresetEntries = computed(() => {
     return Object.entries(presetState.presets)
-        .sort((a, b) => {
-            const wA = getPresetWeight(a[0], a[1]);
-            const wB = getPresetWeight(b[0], b[1]);
-            if (wA !== wB) return wA - wB;
-            return a[1].name.localeCompare(b[1].name);
-        });
+        .sort(comparePresetEntries);
 });
 
 // Get connection type for a preset relative to current char/chat
@@ -589,6 +594,7 @@ function createNewPreset() {
                 const id = Date.now().toString(36);
                 presetState.presets[id] = {
                     id: id,
+                    createdAt: Date.now(),
                     name: name,
                     blocks: [],
                     author: '',
@@ -632,12 +638,7 @@ function openPresetSelector() {
     const charId = props.activeChatChar?.id;
     const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
     
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
+    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
 
     entries.forEach(([id, preset]) => {
         const tokens = getPresetTokens(preset);
@@ -1381,6 +1382,7 @@ function processImportedPreset(data, defaultName) {
 
     const newId = Date.now().toString();
     preset.id = newId;
+    if (preset.createdAt === undefined) preset.createdAt = Date.now();
     presetState.presets[newId] = preset;
     editingPresetId.value = newId;
     updateHeaderState();
@@ -1927,10 +1929,7 @@ onBeforeUnmount(() => {
                                  :class="['ps-conn-' + (getPresetConnectionType(id) || 'none'), { 'ps-with-bg': !!preset.image }]"
                                  @click="openPresetConnections(id, $event)"
                                  :title="t('header_connections') || 'Connections'">
-                                <svg v-if="getPresetConnectionType(id) === 'chat'" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-                                <svg v-else-if="getPresetConnectionType(id) === 'character'" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-                                <svg v-else-if="getPresetConnectionType(id) === 'global'" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                                <svg v-else viewBox="0 0 24 24"><path d="M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z"/></svg>
+                                <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
                             </div>
                         </div>
                         <!-- Edit pencil -->
@@ -2247,16 +2246,12 @@ onBeforeUnmount(() => {
   color: var(--vk-blue);
   padding: 0 14px;
   border-radius: 16px;
-  background-color: var(--white);
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
   transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
   overflow: hidden;
-}
-
-:global(body.dark-theme) .preset-selector {
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
 }
 
 .preset-selector:active {
@@ -2559,17 +2554,8 @@ onBeforeUnmount(() => {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
     /* Fade from dark at top to app background color at bottom */
-    background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 80px, var(--app-bg) 200px);
-    z-index: 0;
-}
-
-.preset-dashboard.has-background > * {
-    position: relative;
-    z-index: 1;
-}
-
-body.dark-theme .preset-dashboard.has-background::before {
     background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.6) 80px, var(--app-bg) 200px);
+    z-index: 0;
 }
 
 .preset-dashboard.has-background .active-preset-name,
@@ -2798,12 +2784,8 @@ body.dark-theme .preset-dashboard.has-background::before {
 }
 
 .hierarchy-item.active {
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}
-
-body.dark-theme .hierarchy-item.active {
     background: #2c2c2e;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
 .hierarchy-item.empty {
@@ -2946,10 +2928,6 @@ body.dark-theme .hierarchy-item.active {
 .stash-section {
     margin-top: 16px;
     padding-top: 16px;
-    border-top: 1px solid rgba(0,0,0,0.05);
-}
-
-body.dark-theme .stash-section {
     border-top: 1px solid rgba(255,255,255,0.05);
 }
 
@@ -3003,15 +2981,10 @@ body.dark-theme .stash-section {
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    background: rgba(0,0,0,0.03);
-    border: 1px solid rgba(0,0,0,0.05);
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.05);
     border-radius: 10px;
     gap: 12px;
-}
-
-body.dark-theme .stashed-item {
-    background: rgba(255,255,255,0.03);
-    border-color: rgba(255,255,255,0.05);
 }
 
 .stashed-info {
@@ -3340,7 +3313,7 @@ body.dark-theme .stashed-item {
 
 .ps-card-meta {
     font-size: 12px;
-    color: var(--text-light-gray);
+    color: var(--text-gray);
     display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;

@@ -4,7 +4,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, setLorebookActivation, flushLorebookSave } from '@/core/states/lorebookState.js';
+import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, flushLorebookSave } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 
@@ -155,19 +155,68 @@ async function loadPickerData() {
 }
 
 function getActivationState(lb) {
-    const isGlobal = lb.enabled;
-    const isChar = currentContext.value.charId && lorebookState.activations?.character?.[currentContext.value.charId]?.includes(lb.id);
-    const isChat = currentContext.value.chatId && lorebookState.activations?.chat?.[currentContext.value.chatId]?.includes(lb.id);
-    
-    if (isGlobal) return 'global';
-    if (isChar) return 'character';
+    const isGlobal = !!lb.enabled;
+    const isChar = !!(currentContext.value.charId && lorebookState.activations?.character?.[currentContext.value.charId]?.includes(lb.id));
+    const isChat = !!(currentContext.value.chatId && lorebookState.activations?.chat?.[currentContext.value.chatId]?.includes(lb.id));
+
+    // Priority for "applies here": chat > character > global
     if (isChat) return 'chat';
+    if (isChar) return 'character';
+    if (isGlobal) return 'global';
     return 'disabled';
 }
 
 function openConnectionManager(lb) {
     window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'lorebook', id: lb.id, name: lb.name } }));
 }
+
+function getLorebookConnectionCounts(lbId) {
+    let chars = 0;
+    let chats = 0;
+
+    const charMap = lorebookState.activations?.character || {};
+    Object.values(charMap).forEach((ids) => {
+        if (Array.isArray(ids) && ids.includes(lbId)) chars++;
+    });
+
+    const chatMap = lorebookState.activations?.chat || {};
+    Object.values(chatMap).forEach((ids) => {
+        if (Array.isArray(ids) && ids.includes(lbId)) chats++;
+    });
+
+    return { chars, chats };
+}
+
+function getActivationLabel(scope) {
+    if (scope === 'global') return t('label_global') || 'Global';
+    if (scope === 'character') return t('header_characters') || 'Character';
+    if (scope === 'chat') return t('tab_dialogs') || 'Chat';
+    return t('off') || 'Off';
+}
+
+function getActivationContextHint(scope) {
+    if (scope === 'character') {
+        const c = allCharacters.value.find((x) => x.id === currentContext.value.charId);
+        return c?.name || currentContext.value.charId || '';
+    }
+    if (scope === 'chat') {
+        const s = allSessions.value.find((x) => x.id === currentContext.value.chatId);
+        return s ? `${s.charName} #${s.sessionId}` : (currentContext.value.chatId || '');
+    }
+    return '';
+}
+
+function isCharActive(lbId, charId) {
+    if (!charId) return false;
+    return !!lorebookState.activations?.character?.[charId]?.includes(lbId);
+}
+
+function isChatActive(lbId, chatId) {
+    if (!chatId) return false;
+    return !!lorebookState.activations?.chat?.[chatId]?.includes(lbId);
+}
+
+// activation now managed via LorebookConnectionsSheet
 
 // --- Lifecycle ---
 
@@ -348,8 +397,11 @@ defineExpose({ open, openEntry, close, openLorebook });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="flushLorebookSave">
+    <SheetView ref="sheet" :z-index="11000" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="flushLorebookSave">
         <template #header-right>
+            <div v-if="currentView === 'list'" class="clickable-no-drag" style="display:flex; align-items:center;">
+                <HelpTip term="lorebook-keys" />
+            </div>
             <div v-if="currentView === 'edit_entry'" class="header-toggle" style="align-items: center;">
                  <input type="checkbox" v-model="activeEntry.enabled" class="vk-switch">
             </div>
@@ -441,14 +493,16 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 <div class="lb-info">
                                     <div class="lb-name">{{ lb.name }}</div>
                                     <div class="lb-meta">{{ lb.entries.length }} {{ t('label_entries') }}</div>
+                                    <div class="lb-conn-badges" style="margin-top: 6px;">
+                                        <span v-if="lb.enabled" class="conn-badge global">{{ t('label_global') || 'Global' }}</span>
+                                        <span v-if="getLorebookConnectionCounts(lb.id).chars" class="conn-badge char">{{ getLorebookConnectionCounts(lb.id).chars }} {{ t('header_characters') || 'chars' }}</span>
+                                        <span v-if="getLorebookConnectionCounts(lb.id).chats" class="conn-badge chat">{{ getLorebookConnectionCounts(lb.id).chats }} {{ t('tab_dialogs') || 'chats' }}</span>
+                                    </div>
                                 </div>
                                 <div class="lb-actions">
-                                    <div class="activation-btn" :class="getActivationState(lb)" @click.stop="openConnectionManager(lb)">
-                                        <svg v-if="getActivationState(lb) === 'global'" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                                        <svg v-else-if="getActivationState(lb) === 'character'" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-                                        <svg v-else-if="getActivationState(lb) === 'chat'" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
-                                        <svg v-else viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.59-13L12 10.59 8.41 7 7 8.41 10.59 12 7 15.59 8.41 17 12 13.41 15.59 17 17 15.59 13.41 12 17 8.41z"/></svg>
-                                    </div>
+                                    <button class="activation-btn" :class="getActivationState(lb)" @click.stop="openConnectionManager(lb)">
+                                        <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
+                                    </button>
                                     <div class="action-btn more" @click.stop="handleLorebookMenu(lb)">
                                         <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
                                     </div>
@@ -763,23 +817,14 @@ defineExpose({ open, openEntry, close, openLorebook });
     display: flex;
     flex-direction: column;
     border-radius: 16px;
-    background: rgba(255, 255, 255, var(--element-opacity, 0.7));
+    background: rgba(30, 30, 32, var(--element-opacity, 0.7));
     backdrop-filter: blur(var(--element-blur, 10px));
-    border: 1px solid rgba(var(--vk-blue-rgb), 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     overflow: hidden;
     transition: all 0.2s;
 }
 
-body.dark-theme .lb-item-wrapper {
-    background: rgba(30, 30, 32, var(--element-opacity, 0.7));
-    border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
 .lb-item-wrapper.expanded {
-    background: rgba(255, 255, 255, 0.9);
-}
-
-body.dark-theme .lb-item-wrapper.expanded {
     background: rgba(40, 40, 42, 0.9);
 }
 
@@ -800,11 +845,6 @@ body.dark-theme .lb-item-wrapper.expanded {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    border-top: 1px solid rgba(0,0,0,0.05);
-    background: rgba(0,0,0,0.01);
-}
-
-body.dark-theme .lb-activation-inline {
     border-top: 1px solid rgba(255,255,255,0.05);
     background: rgba(255,255,255,0.01);
 }
@@ -907,6 +947,78 @@ body.dark-theme .lb-activation-inline {
     gap: 12px;
 }
 
+.activation-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.05);
+    color: var(--text-black);
+    cursor: pointer;
+    font-family: inherit;
+    max-width: 190px;
+}
+
+.activation-pill.global {
+    background: rgba(0, 122, 255, 0.12);
+    border-color: rgba(0, 122, 255, 0.18);
+}
+.activation-pill.character {
+    background: rgba(175, 82, 222, 0.12);
+    border-color: rgba(175, 82, 222, 0.18);
+}
+.activation-pill.chat {
+    background: rgba(255, 149, 0, 0.12);
+    border-color: rgba(255, 149, 0, 0.18);
+}
+.activation-pill.disabled {
+    opacity: 0.7;
+}
+
+.pill-scope {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-gray);
+}
+.activation-pill.global .pill-scope { color: #007aff; }
+.activation-pill.character .pill-scope { color: #af52de; }
+.activation-pill.chat .pill-scope { color: #ff9500; }
+
+.pill-hint {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-black);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+}
+
+.lb-conn-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.conn-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-gray);
+    white-space: nowrap;
+}
+
+.conn-badge.global { color: #34c759; background: rgba(52, 199, 89, 0.12); }
+.conn-badge.char { color: #af52de; background: rgba(175, 82, 222, 0.12); }
+.conn-badge.chat { color: #ff9500; background: rgba(255, 149, 0, 0.12); }
+
 .action-btn svg { width: 22px; height: 22px; fill: currentColor; }
 
 .activation-btn {
@@ -917,33 +1029,35 @@ body.dark-theme .lb-activation-inline {
     justify-content: center;
     border-radius: 50%;
     color: var(--text-gray);
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     transition: all 0.2s;
 }
 
-body.dark-theme .activation-btn {
-    background: rgba(255, 255, 255, 0.05);
+.activation-btn:active {
+    transform: scale(0.9);
+    opacity: 0.8;
 }
 
 .activation-btn svg {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     fill: currentColor;
 }
 
 .activation-btn.global {
-    color: #007aff;
-    background: rgba(0, 122, 255, 0.1);
+    color: #34c759;
 }
 
 .activation-btn.character {
     color: #af52de;
-    background: rgba(175, 82, 222, 0.1);
 }
 
 .activation-btn.chat {
     color: #ff9500;
-    background: rgba(255, 149, 0, 0.1);
 }
 
 .activation-btn.disabled {
@@ -953,7 +1067,7 @@ body.dark-theme .activation-btn {
 /* Search Bar */
 .search-bar {
     padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(8px);
     position: sticky;
     top: 0;
@@ -961,15 +1075,10 @@ body.dark-theme .activation-btn {
     width: auto;
     display: flex;
     align-items: center;
-    border-bottom: 1px solid rgba(var(--vk-blue-rgb), 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     margin: 8px 16px;
     border-radius: 12px;
     box-sizing: border-box;
-}
-
-body.dark-theme .search-bar {
-    background: rgba(0, 0, 0, 0.2);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 .search-icon { width: 20px; height: 20px; fill: var(--text-gray); margin-right: 12px; }
 .search-bar input {
@@ -994,20 +1103,12 @@ body.dark-theme .search-bar {
 
 
 .menu-group {
-    background: rgba(255, 255, 255, var(--element-opacity, 0.7));
+    background: rgba(30, 30, 32, var(--element-opacity, 0.7));
     backdrop-filter: blur(var(--element-blur, 10px));
     border-radius: 20px;
     margin: 0 16px 16px;
-    border: 1px solid rgba(var(--vk-blue-rgb), 0.1);
-    overflow: hidden;
-}
-.menu-group.first-group {
-    margin-top: 16px;
-}
-
-body.dark-theme .menu-group {
-    background: rgba(30, 30, 32, var(--element-opacity, 0.7));
     border: 1px solid rgba(255, 255, 255, 0.05);
+    overflow: hidden;
 }
 
 .settings-item {
@@ -1027,35 +1128,22 @@ body.dark-theme .menu-group {
 }
 
 .settings-item input, .settings-item textarea, .settings-item select {
-    border: 1px solid rgba(0,0,0,0.08);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 12px;
     padding: 12px;
     font-size: 15px;
     font-family: inherit;
-    background: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.2);
     outline: none;
     width: 100%;
     color: var(--text-black);
     transition: border-color 0.2s, background-color 0.2s;
 }
 
-body.dark-theme .settings-item input, 
-body.dark-theme .settings-item textarea, 
-body.dark-theme .settings-item select {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
 .settings-item input:focus, 
 .settings-item textarea:focus, 
 .settings-item select:focus {
     border-color: var(--vk-blue);
-    background: rgba(255, 255, 255, 0.7);
-}
-
-body.dark-theme .settings-item input:focus, 
-body.dark-theme .settings-item textarea:focus, 
-body.dark-theme .settings-item select:focus {
     background: rgba(0, 0, 0, 0.4);
 }
 
@@ -1133,9 +1221,9 @@ body.dark-theme .settings-item select:focus {
     width: 100%;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.06);
-    background: rgba(255,255,255,0.4);
-    color: var(--text-black);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.2);
+    color: white;
     font-family: inherit;
     font-size: 15px;
     font-weight: 600;
@@ -1146,12 +1234,6 @@ body.dark-theme .settings-item select:focus {
     background-position: right 12px center;
     background-size: 20px;
     transition: all 0.2s;
-}
-
-body.dark-theme .vk-select {
-    background: rgba(0,0,0,0.2);
-    border-color: rgba(255,255,255,0.05);
-    color: white;
 }
 
 .global-settings-group {
@@ -1190,20 +1272,15 @@ body.dark-theme .vk-select {
     width: 100%;
     padding: 10px 12px;
     border-radius: 12px;
-    border: 1px solid rgba(0,0,0,0.06);
-    background: rgba(255,255,255,0.4);
-    color: var(--text-black);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(0, 0, 0, 0.2);
+    color: white;
     font-family: inherit;
     font-size: 15px;
     font-weight: 600;
     outline: none;
     transition: all 0.2s;
     box-sizing: border-box;
-}
-body.dark-theme .settings-col input {
-     background: rgba(0,0,0,0.2);
-     border: 1px solid rgba(255,255,255,0.05);
-     color: white;
 }
 
 .small-checkbox {
