@@ -162,6 +162,7 @@
     "sheet_title_select_char": "Select Character",
     "sheet_title_chat_actions": "Chat",
     "action_new_session": "New Session",
+    "action_rename": "Rename",
     "action_delete_session": "Delete Session",
     "sheet_title_char_actions": "Character",
     "action_chat_stats": "Chat Statistics",

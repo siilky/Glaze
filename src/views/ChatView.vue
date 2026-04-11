@@ -427,11 +427,13 @@ async function setupHeader(char = activeChatChar) {
     if (!char) return;
     const data = await getChatData(char.id);
     const initialSessionId = char.sessionId || (data ? data.currentId : '...');
+    const sessionName = data?.sessionNames?.[initialSessionId];
 
     window.dispatchEvent(new CustomEvent('header-setup-chat', { 
         detail: { 
             char, 
             currentSessionId: initialSessionId, 
+            sessionName,
             callbacks: {
                 onActionsClick: () => openSessionsSheet(char),
                 onBackClick: () => {

@@ -119,7 +119,7 @@ function setupEditorHeader(title, onBack, actions) {
     toggleTabbar(false);
 }
 
-function setupChatHeader(char, currentSessionId, callbacks) {
+function setupChatHeader(char, currentSessionId, callbacks, sessionName) {
     clearHeader('chat');
     state.showChatInfo = true;
     state.showActions = true;
@@ -127,7 +127,7 @@ function setupChatHeader(char, currentSessionId, callbacks) {
     
     const safeName = (char && char.name) ? char.name : "Unknown";
     state.chat.name = safeName.length > 20 ? safeName.substring(0, 20) + '...' : safeName;
-    state.chat.session = `Session #${currentSessionId}`;
+    state.chat.session = sessionName || `Session #${currentSessionId}`;
     state.chat.avatar = char && char.avatar ? char.avatar : null;
     state.chat.color = char && char.color ? char.color : '';
     state.chat.initial = (safeName[0] || "?").toUpperCase();
@@ -321,8 +321,8 @@ const handleAvatarClick = (e) => {
 
 // Listeners for external events (from header.js bridge)
 const onSetupChat = (e) => {
-    const { char, currentSessionId, callbacks } = e.detail;
-    setupChatHeader(char, currentSessionId, callbacks);
+    const { char, currentSessionId, callbacks, sessionName } = e.detail;
+    setupChatHeader(char, currentSessionId, callbacks, sessionName);
 };
 
 const onUpdateAvatar = (e) => {
