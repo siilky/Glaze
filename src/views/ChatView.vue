@@ -483,7 +483,8 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
-    
+
+    try {
     // Attempt to migrate legacy stats locally
     await migrateStatsIfNeeded();
 
@@ -648,7 +649,29 @@ async function openChat(char, onBack, force = false) {
     if (dirty) {
         await db.saveChat(char.id, chatData);
     }
-    
+
+    // Cleanup stuck imggen-loading states (saved during interrupted generation).
+    // Convert them back to canonical <img data-iig-instruction='...' src="[IMG:GEN]"> so
+    // processMessageImages can pick them up and regenerate on this load.
+    {
+        const loadingSpanRe = /<span\b[^>]*\bclass="[^"]*\bimggen-loading\b[^"]*"[^>]*data-iig-instruction='([^']*)'[^>]*>(?:<span[^>]*>[^<]*<\/span>)*<\/span>/g;
+        let dirtyImggen = false;
+        const fixText = (t) => t ? t.replace(loadingSpanRe, (_, enc) => `<img data-iig-instruction='${enc}' src="[IMG:GEN]">`) : t;
+        for (const msg of msgs) {
+            if (!msg?.text?.includes('imggen-loading')) continue;
+            const newText = fixText(msg.text);
+            if (newText !== msg.text) {
+                msg.text = newText;
+                if (msg.swipes) msg.swipes = msg.swipes.map(fixText);
+                dirtyImggen = true;
+            }
+        }
+        if (dirtyImggen) {
+            chatData.sessions[currentSessionId] = msgs;
+            await db.saveChat(char.id, chatData);
+        }
+    }
+
     currentMessages.value = msgs;
     
     // First Message Logic
@@ -780,11 +803,13 @@ async function openChat(char, onBack, force = false) {
         }));
     }
 
-    isLoading.value = false;
-    isOpeningChat = false;
-    if (pendingCutoffRecalc) {
-        pendingCutoffRecalc = false;
-        updateContextCutoff();
+    } finally {
+        isLoading.value = false;
+        isOpeningChat = false;
+        if (pendingCutoffRecalc) {
+            pendingCutoffRecalc = false;
+            updateContextCutoff();
+        }
     }
 }
 
@@ -1414,7 +1439,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
                 msg.swipes[msg.swipeId || 0] = updatedText;
-                updateSessionMessage(char, foundIndex, msg);
+                // Only persist to DB once all images are resolved (no loading states remain)
+                if (!updatedText.includes('imggen-loading')) {
+                    updateSessionMessage(char, foundIndex, msg);
+                }
             }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
@@ -1470,7 +1498,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     processMessageImages(response, (updatedText) => {
                         msg.text = updatedText;
                         msg.swipes[msg.swipeId || 0] = updatedText;
-                        db.saveChat(char.id, bgData);
+                        // Only persist to DB once all images are resolved (no loading states remain)
+                        if (!updatedText.includes('imggen-loading')) {
+                            db.saveChat(char.id, bgData);
+                        }
                     }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
                         if (finalText !== msg.text) {
                             msg.text = finalText;
