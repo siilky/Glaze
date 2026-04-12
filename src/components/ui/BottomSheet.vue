@@ -687,7 +687,7 @@ onBeforeUnmount(() => {
 }
 
 .bottom-sheet-content.keyboard-open {
-    padding-bottom: calc(var(--keyboard-overlap, var(--keyboard-height, 300px)) + 10px + var(--sab, 0px));
+    padding-bottom: calc(var(--keyboard-overlap, 0px) + 10px + var(--sab, 0px));
     max-height: 95vh;
 }
 
