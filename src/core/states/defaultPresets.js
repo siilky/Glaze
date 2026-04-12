@@ -16,6 +16,9 @@ shinoConverted.author = 'Shino';
 shinoConverted.authorLink = 'https://t.me/ah_ah_shino4ka';
 shinoConverted.descriptionKey = 'preset_shino_desc';
 shinoConverted.isFeatured = true;
+shinoConverted.parseInlineReasoning = true;
+shinoConverted.reasoningStart = '<thinking>';
+shinoConverted.reasoningEnd = '</thinking>';
 shinoConverted.createdAt = 1;
 
 const fawnieConverted = convertSTPreset(fawnieJson, fawnieJson.name || 'Fawnie v3');
