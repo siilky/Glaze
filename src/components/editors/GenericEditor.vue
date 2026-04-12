@@ -3,6 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const props = defineProps({
     modelValue: { type: Object, required: true },
@@ -264,12 +265,17 @@ function getSelectedLabel(field) {
                     
                 <div v-for="(field, fIdx) in section.fields" :key="fIdx" class="settings-item">
                     
-                    <!-- Label Row -->
-                    <div class="label-row" v-if="field.expandable || field.type === 'greeting_list'">
-                        <label>{{ t(field.label) || field.label }}</label> 
+                    <div class="label-row" v-if="field.expandable || field.type === 'greeting_list' || field.helpTerm">
+                        <label>
+                            {{ t(field.label) || field.label }}
+                            <HelpTip v-if="field.helpTerm" :term="field.helpTerm" />
+                        </label> 
                         <div v-if="field.expandable" class="expand-btn" @click="openFsEditor(field.key)"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
                     </div>
-                    <label v-else-if="field.type !== 'greeting_list'">{{ t(field.label) || field.label }}</label>
+                    <label v-else-if="field.type !== 'greeting_list'">
+                        {{ t(field.label) || field.label }}
+                        <HelpTip v-if="field.helpTerm" :term="field.helpTerm" />
+                    </label>
 
                     <!-- Inputs -->
                     <input v-if="field.type === 'text'" type="text" v-model="item[field.key]" @input="autoSave" :placeholder="field.placeholder ? t(field.placeholder) : ''">
