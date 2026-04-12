@@ -532,6 +532,17 @@ const onOpenBackupSheet = () => {
     });
 };
 
+const onOpenPresetSheet = (e) => {
+    waitForComponent(presetViewRef, (comp) => {
+        const presetId = e?.detail?.presetId;
+        if (presetId) {
+            comp.openPreset(presetId, true);
+        } else {
+            comp.open();
+        }
+    });
+};
+
 const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
 const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
 const onHeaderReset = () => { isHeaderEditorMode.value = false; };
@@ -602,6 +613,7 @@ onMounted(async () => {
     window.addEventListener('open-item-editor', onOpenItemEditor);
     window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.addEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.addEventListener('open-preset-sheet', onOpenPresetSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
@@ -649,6 +661,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-item-editor', onOpenItemEditor);
     window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
     window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
+    window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
@@ -854,7 +867,7 @@ watch(currentView, () => {
 }
 
 #main-container.keyboard-open {
-    padding-bottom: var(--keyboard-overlap, 300px) !important;
+    padding-bottom: var(--keyboard-overlap, 0px) !important;
 }
 
 .active-view::-webkit-scrollbar-track {
