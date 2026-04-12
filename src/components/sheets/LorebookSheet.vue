@@ -409,10 +409,12 @@ defineExpose({ open, openEntry, close, openLorebook });
 
 <template>
     <SheetView ref="sheet" :z-index="11000" :title="sheetTitle" :show-back="showBackBtn" :actions="sheetActions" @back="goBack" @close="flushLorebookSave">
-        <template #header-right>
+        <template #header-title>
             <div v-if="currentView === 'list'" class="clickable-no-drag" style="display:flex; align-items:center;">
-                <HelpTip term="lorebook-keys" />
+                <HelpTip term="lorebook" />
             </div>
+        </template>
+        <template #header-right>
             <div v-if="currentView === 'edit_entry'" class="header-toggle" style="align-items: center;">
                  <input type="checkbox" v-model="activeEntry.enabled" class="vk-switch">
             </div>

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, checkImageGenConnection } from '@/core/services/imageGenService.js';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
@@ -232,6 +233,9 @@ defineExpose({ open });
 
 <template>
     <SheetView ref="sheet" :title="t('imggen_title') || 'Image Generation'">
+        <template #header-title>
+            <HelpTip term="image-gen" />
+        </template>
         <template #header-right>
             <div class="header-toggle" style="align-items: center; display: flex; padding-right: 8px;">
                  <input type="checkbox" v-model="settings.enabled" class="vk-switch">
@@ -242,19 +246,15 @@ defineExpose({ open });
             <template v-if="settings.enabled">
 
                 <!-- Connection -->
-                <div class="menu-group">
-                    <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
-                        <span class="section-header" style="margin: 0; padding: 0; background: none; border: none; box-shadow: none;">{{ t('section_connection') || 'Connection' }}</span>
-                    </ConnectionStatus>
-
-                    <!-- API Type selector row -->
-                    <div class="settings-item selector-row" @click="openApiTypeSelector">
-                        <label>{{ t('imggen_api_type') || 'API Type' }}</label>
-                        <div class="selector-value">
-                            <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
-                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                        </div>
+                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                    <div class="preset-selector" @click="openApiTypeSelector">
+                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
+                        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
+                </ConnectionStatus>
+
+                <div class="menu-group">
+                    <div class="section-header">{{ t('section_connection') || 'Connection' }}</div>
 
                     <!-- Naistera hint -->
                     <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
@@ -483,6 +483,35 @@ defineExpose({ open });
 <style scoped>
 .gen-sheet-body {
     position: relative;
+}
+
+.preset-selector {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vk-blue);
+  padding: 0 14px;
+  border-radius: 16px;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
+  overflow: hidden;
+}
+
+.preset-selector:active {
+  transform: scale(0.95);
+  opacity: 0.8;
+}
+
+.preset-selector svg {
+    width: 20px;
+    height: 20px;
 }
 
 .naistera-hint-box {

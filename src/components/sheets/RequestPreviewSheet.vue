@@ -4,6 +4,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { getLastPrompt } from '@/core/services/generationService.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import HelpTip from '@/components/ui/HelpTip.vue';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -58,6 +59,9 @@ defineExpose({ open });
 
 <template>
     <SheetView ref="sheet" :title="t('magic_request_preview')">
+        <template #header-title>
+            <HelpTip term="request-preview" />
+        </template>
         <template #header-bottom>
             <div class="gen-sheet-tabs">
                 <div class="segmented-control">
