@@ -211,7 +211,13 @@ async function handleFileSelect(event) {
             
             // Ephemerality: ST's promptOnly means it's ONLY for prompt (2)
             // If promptOnly is false, it's for both display (1) and prompt (2)
-            const ephemerality = item.ephemerality || (item.promptOnly === true ? [2] : [1, 2]);
+            let ephemerality = item.ephemerality;
+            if (!ephemerality) {
+                if (item.markdownOnly === true && item.promptOnly === false) ephemerality = [1];
+                else if (item.markdownOnly === false && item.promptOnly === true) ephemerality = [2];
+                else if (item.markdownOnly === true && item.promptOnly === true) ephemerality = [1, 2];
+                else ephemerality = [1, 2];
+            }
 
             const script = {
                 id: Date.now().toString() + Math.random(),
@@ -222,6 +228,7 @@ async function handleFileSelect(event) {
                 placement,
                 disabled: item.disabled ?? false,
                 markdownOnly: item.markdownOnly ?? false,
+                promptOnly: item.promptOnly ?? false,
                 runOnEdit: item.runOnEdit ?? false,
                 macroRules: (item.substituteRegex ?? 0).toString(),
                 ephemerality,
