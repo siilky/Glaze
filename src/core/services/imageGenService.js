@@ -1,5 +1,6 @@
 import { t } from '@/utils/i18n.js';
 import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
+import { addNotification } from '@/core/states/notificationsState.js';
 
 /**
  * Image Generation Service for Glaze
@@ -582,6 +583,7 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     onUpdate(current);
 
     if (placeholders.length > 0) {
+        addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
         startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
     }
 
