@@ -1033,7 +1033,7 @@ onUnmounted(() => {
     cursor: pointer;
     color: var(--text-gray);
     background-color: rgba(var(--ui-bg-rgb), 0.5);
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid #555555;
     border-radius: 6px;
     transition: all 0.2s;
     flex-shrink: 0;
@@ -1088,7 +1088,7 @@ onUnmounted(() => {
     align-items: center;
     padding: 10px 12px;
     background: var(--menu-group-bg, rgba(0, 0, 0, 0.02));
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid #555555;
     border-radius: 12px;
     gap: 12px;
     cursor: pointer;
