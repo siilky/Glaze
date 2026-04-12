@@ -57,6 +57,7 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     line-height: normal;
+    letter-spacing: var(--ui-letter-spacing, 0px);
     height: 100%;
     overflow: hidden;
     overscroll-behavior: none;

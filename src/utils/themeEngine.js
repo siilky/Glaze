@@ -37,5 +37,7 @@ export {
     exportThemePreset,
     importThemePreset,
     setUiTextColor,
-    setUiTextGrayColor
+    setUiTextGrayColor,
+    setUiFontMode,
+    setChatFontMode
 } from '@/core/states/themeState.js';

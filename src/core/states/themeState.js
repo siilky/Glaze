@@ -26,6 +26,8 @@ export const themeState = reactive({
     chatFontSize: 15,
     chatLetterSpacing: 0,
     chatFontName: null,
+    uiFontMode: 'glaze',
+    chatFontMode: 'ui',
     uiTextColor: null,
     uiTextGrayColor: null,
     borderWidth: 1,
@@ -80,12 +82,14 @@ export const DEFAULT_PRESET = {
     charTextColor: null,
     userItalicColor: null,
     charItalicColor: null,
-    uiFontSize: 15,
+    uiFontSize: 'system',
     uiLetterSpacing: 0,
-    chatFontSize: 15,
+    chatFontSize: 'system',
     chatLetterSpacing: 0,
     chatFont: null,
     chatFontName: null,
+    uiFontMode: 'glaze',
+    chatFontMode: 'ui',
     uiTextColor: null,
     uiTextGrayColor: null,
     borderWidth: 1,
@@ -99,6 +103,8 @@ export const DEFAULT_PRESET = {
 
 let saveTimeout = null;
 let isApplyingPreset = false;
+let _uiFontDataUrl = null;
+let _chatFontDataUrl = null;
 
 function scheduleSave() {
     if (isApplyingPreset) return;
@@ -150,6 +156,8 @@ async function saveStateToActivePreset() {
             chatLetterSpacing: themeState.chatLetterSpacing,
             chatFont: chatFontData,
             chatFontName: chatFontNameData,
+            uiFontMode: themeState.uiFontMode,
+            chatFontMode: themeState.chatFontMode,
             uiTextColor: themeState.uiTextColor,
             uiTextGrayColor: themeState.uiTextGrayColor,
             borderWidth: themeState.borderWidth,
@@ -273,8 +281,11 @@ export async function initTheme() {
     const savedFont = await db.get('gz_theme_font');
     const savedFontName = await db.get('gz_theme_font_name');
     if (savedFont) {
-        applyCustomFont(savedFont, savedFontName);
+        _uiFontDataUrl = savedFont;
+        themeState.customFontName = savedFontName;
+        themeState.uiFontMode = 'custom';
     }
+    applyUiFont();
     updateThemeStyles();
 
     // Create initial preset from current state
@@ -306,6 +317,8 @@ export async function initTheme() {
         chatLetterSpacing: themeState.chatLetterSpacing,
         chatFont: null,
         chatFontName: null,
+        uiFontMode: themeState.uiFontMode,
+        chatFontMode: themeState.chatFontMode,
         uiTextColor: themeState.uiTextColor,
         uiTextGrayColor: themeState.uiTextGrayColor,
         borderWidth: themeState.borderWidth,
@@ -455,35 +468,75 @@ function applyBackgroundImage(dataUrl) {
 
 export async function setCustomFont(file) {
     if (!file) {
+        _uiFontDataUrl = null;
         try {
             await db.set('gz_theme_font', null);
             await db.set('gz_theme_font_name', null);
         } catch (e) {
             console.error("Failed to delete font from db", e);
         }
-        applyCustomFont(null, null);
+        themeState.customFontName = null;
+        if (themeState.uiFontMode === 'custom') {
+            themeState.uiFontMode = 'glaze';
+        }
+        applyUiFont();
         scheduleSave();
         return;
     }
 
     const reader = new FileReader();
     reader.onload = async (e) => {
-        const result = e.target.result;
+        _uiFontDataUrl = e.target.result;
         try {
-            await db.set('gz_theme_font', result);
+            await db.set('gz_theme_font', _uiFontDataUrl);
             await db.set('gz_theme_font_name', file.name);
         } catch (e) {
             console.error("Failed to save font to db", e);
         }
-        applyCustomFont(result, file.name);
+        themeState.customFontName = file.name;
+        themeState.uiFontMode = 'custom';
+        applyUiFont();
         scheduleSave();
     };
     reader.readAsDataURL(file);
 }
 
-function applyCustomFont(dataUrl, name) {
+export function setUiFontMode(mode) {
+    themeState.uiFontMode = mode;
+    if (mode !== 'custom') {
+        themeState.customFontName = null;
+    }
+    applyUiFont();
+    scheduleSave();
+}
+
+export function setChatFontMode(mode) {
+    themeState.chatFontMode = mode;
+    if (mode !== 'custom') {
+        themeState.chatFontName = null;
+    }
+    applyChatFont();
+    scheduleSave();
+}
+
+const SYSTEM_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+function applyUiFont() {
     let styleEl = document.getElementById('theme-custom-font');
-    if (dataUrl) {
+    const mode = themeState.uiFontMode;
+
+    if (mode === 'system') {
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'theme-custom-font';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = `
+            body, button, input, textarea, select, .menu-text, .section-header, .item-title, .item-subtitle {
+                font-family: ${SYSTEM_FONT_STACK} !important;
+            }
+        `;
+    } else if (mode === 'custom' && _uiFontDataUrl) {
         if (!styleEl) {
             styleEl = document.createElement('style');
             styleEl.id = 'theme-custom-font';
@@ -492,24 +545,44 @@ function applyCustomFont(dataUrl, name) {
         styleEl.textContent = `
             @font-face {
                 font-family: 'GlazeCustomFont';
-                src: url('${dataUrl}');
+                src: url('${_uiFontDataUrl}');
                 font-display: swap;
             }
             body, button, input, textarea, select, .menu-text, .section-header, .item-title, .item-subtitle {
-                font-family: 'GlazeCustomFont', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+                font-family: 'GlazeCustomFont', 'Inter', ${SYSTEM_FONT_STACK} !important;
                 font-weight: 450;
             }
         `;
-        themeState.customFontName = name;
     } else {
+        // glaze mode (Inter is default in CSS)
         if (styleEl) styleEl.remove();
-        themeState.customFontName = null;
+    }
+
+    // Cascade to chat if it inherits from UI
+    if (themeState.chatFontMode === 'ui') {
+        applyChatFont();
     }
 }
 
-function applyChatFont(dataUrl, name) {
+function applyChatFont() {
     let styleEl = document.getElementById('theme-chat-font');
-    if (dataUrl) {
+    const mode = themeState.chatFontMode;
+
+    if (mode === 'system') {
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'theme-chat-font';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = `.msg-body { font-family: ${SYSTEM_FONT_STACK} !important; }`;
+    } else if (mode === 'glaze') {
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'theme-chat-font';
+            document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = `.msg-body { font-family: 'Inter', ${SYSTEM_FONT_STACK} !important; }`;
+    } else if (mode === 'custom' && _chatFontDataUrl) {
         if (!styleEl) {
             styleEl = document.createElement('style');
             styleEl.id = 'theme-chat-font';
@@ -518,18 +591,17 @@ function applyChatFont(dataUrl, name) {
         styleEl.textContent = `
             @font-face {
                 font-family: 'GlazeChatFont';
-                src: url('${dataUrl}');
+                src: url('${_chatFontDataUrl}');
                 font-display: swap;
             }
             .msg-body {
-                font-family: 'GlazeChatFont', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+                font-family: 'GlazeChatFont', 'Inter', ${SYSTEM_FONT_STACK} !important;
                 font-weight: 450;
             }
         `;
-        themeState.chatFontName = name;
     } else {
+        // 'ui' mode — inherit from body (whatever UI font is active)
         if (styleEl) styleEl.remove();
-        themeState.chatFontName = null;
     }
 }
 
@@ -561,12 +633,14 @@ export async function createPreset(name) {
         charTextColor: null,
         userItalicColor: null,
         charItalicColor: null,
-        uiFontSize: 15,
+        uiFontSize: 'system',
         uiLetterSpacing: 0,
-        chatFontSize: 15,
+        chatFontSize: 'system',
         chatLetterSpacing: 0,
         chatFont: null,
         chatFontName: null,
+        uiFontMode: 'glaze',
+        chatFontMode: 'ui',
         borderWidth: 1,
         borderColor: null,
         borderOpacity: 0.1,
@@ -652,9 +726,9 @@ export async function applyPreset(preset) {
         setCharItalicColor(preset.charItalicColor || null);
         setUiTextColor(preset.uiTextColor || null);
         setUiTextGrayColor(preset.uiTextGrayColor || null);
-        setUiFontSize(preset.uiFontSize !== undefined ? preset.uiFontSize : 15);
+        setUiFontSize(preset.uiFontSize !== undefined ? preset.uiFontSize : 'system');
         setUiLetterSpacing(preset.uiLetterSpacing !== undefined ? preset.uiLetterSpacing : 0);
-        setChatFontSize(preset.chatFontSize !== undefined ? preset.chatFontSize : 15);
+        setChatFontSize(preset.chatFontSize !== undefined ? preset.chatFontSize : 'system');
         setChatLetterSpacing(preset.chatLetterSpacing !== undefined ? preset.chatLetterSpacing : 0);
         setBorderWidth(preset.borderWidth !== undefined ? preset.borderWidth : 1);
         setBorderColor(preset.borderColor || null);
@@ -664,23 +738,29 @@ export async function applyPreset(preset) {
         setBgNoiseOpacity(preset.bgNoiseOpacity !== undefined ? preset.bgNoiseOpacity : 0.03);
         setBgNoiseIntensity(preset.bgNoiseIntensity !== undefined ? preset.bgNoiseIntensity : 0.4);
 
+        // UI font mode (backward compat: infer from customFont if no mode saved)
+        const uiFontMode = preset.uiFontMode || (preset.customFont ? 'custom' : 'glaze');
+        themeState.uiFontMode = uiFontMode;
         if (preset.customFont) {
+            _uiFontDataUrl = preset.customFont;
+            themeState.customFontName = preset.customFontName;
             try {
                 await db.set('gz_theme_font', preset.customFont);
                 await db.set('gz_theme_font_name', preset.customFontName);
             } catch (e) {
                 console.error('Failed to save font preset', e);
             }
-            applyCustomFont(preset.customFont, preset.customFontName);
         } else {
+            _uiFontDataUrl = null;
+            themeState.customFontName = null;
             try {
                 await db.set('gz_theme_font', null);
                 await db.set('gz_theme_font_name', null);
             } catch (e) {
                 console.error('Failed to delete font preset', e);
             }
-            applyCustomFont(null, null);
         }
+        applyUiFont();
 
         if (preset.bgImage) {
             try {
@@ -698,24 +778,29 @@ export async function applyPreset(preset) {
             applyBackgroundImage(null);
         }
 
-        // Chat font
+        // Chat font mode (backward compat: infer from chatFont if no mode saved)
+        const chatFontMode = preset.chatFontMode || (preset.chatFont ? 'custom' : 'ui');
+        themeState.chatFontMode = chatFontMode;
         if (preset.chatFont) {
+            _chatFontDataUrl = preset.chatFont;
+            themeState.chatFontName = preset.chatFontName;
             try {
                 await db.set('gz_theme_chat_font', preset.chatFont);
                 await db.set('gz_theme_chat_font_name', preset.chatFontName);
             } catch (e) {
                 console.error('Failed to save chat font preset', e);
             }
-            applyChatFont(preset.chatFont, preset.chatFontName);
         } else {
+            _chatFontDataUrl = null;
+            themeState.chatFontName = null;
             try {
                 await db.set('gz_theme_chat_font', null);
                 await db.set('gz_theme_chat_font_name', null);
             } catch (e) {
                 console.error('Failed to delete chat font preset', e);
             }
-            applyChatFont(null, null);
         }
+        applyChatFont();
     } finally {
         isApplyingPreset = false;
     }
@@ -812,9 +897,19 @@ function updateThemeStyles() {
     if (uiStyle) uiStyle.remove();
 
     // Font size & letter spacing
-    document.documentElement.style.setProperty('--ui-font-size', themeState.uiFontSize + 'px');
+    if (themeState.uiFontSize === 'system') {
+        document.documentElement.style.removeProperty('--ui-font-size');
+    } else {
+        document.documentElement.style.setProperty('--ui-font-size', themeState.uiFontSize + 'px');
+    }
+
+    if (themeState.chatFontSize === 'system') {
+        document.documentElement.style.removeProperty('--chat-font-size');
+    } else {
+        document.documentElement.style.setProperty('--chat-font-size', themeState.chatFontSize + 'px');
+    }
+
     document.documentElement.style.setProperty('--ui-letter-spacing', themeState.uiLetterSpacing + 'px');
-    document.documentElement.style.setProperty('--chat-font-size', themeState.chatFontSize + 'px');
     document.documentElement.style.setProperty('--chat-letter-spacing', themeState.chatLetterSpacing + 'px');
 
     // Border
@@ -823,10 +918,12 @@ function updateThemeStyles() {
     if (themeState.borderColor) {
         const brgb = hexToRgb(themeState.borderColor);
         document.documentElement.style.setProperty('--border-color', `rgba(${brgb}, ${themeState.borderOpacity})`);
+        document.documentElement.style.setProperty('--border-color-solid', themeState.borderColor);
     } else {
         // Use standard dark default (white)
         const defaultRgb = '255, 255, 255';
         document.documentElement.style.setProperty('--border-color', `rgba(${defaultRgb}, ${themeState.borderOpacity})`);
+        document.documentElement.style.setProperty('--border-color-solid', `rgb(${defaultRgb})`);
     }
 
     // Noise texture (SVG data-URI can't use CSS vars, so inject via style tag)
@@ -943,27 +1040,34 @@ export function setChatLetterSpacing(val) {
 
 export async function setChatFont(file) {
     if (!file) {
+        _chatFontDataUrl = null;
         try {
             await db.set('gz_theme_chat_font', null);
             await db.set('gz_theme_chat_font_name', null);
         } catch (e) {
             console.error('Failed to delete chat font from db', e);
         }
-        applyChatFont(null, null);
+        themeState.chatFontName = null;
+        if (themeState.chatFontMode === 'custom') {
+            themeState.chatFontMode = 'ui';
+        }
+        applyChatFont();
         scheduleSave();
         return;
     }
 
     const reader = new FileReader();
     reader.onload = async (e) => {
-        const result = e.target.result;
+        _chatFontDataUrl = e.target.result;
         try {
-            await db.set('gz_theme_chat_font', result);
+            await db.set('gz_theme_chat_font', _chatFontDataUrl);
             await db.set('gz_theme_chat_font_name', file.name);
         } catch (e) {
             console.error('Failed to save chat font to db', e);
         }
-        applyChatFont(result, file.name);
+        themeState.chatFontName = file.name;
+        themeState.chatFontMode = 'custom';
+        applyChatFont();
         scheduleSave();
     };
     reader.readAsDataURL(file);
@@ -1052,7 +1156,9 @@ export async function exportThemePreset(presetId) {
         customFont: preset.customFont || null,
         customFontName: preset.customFontName || null,
         chatFont: preset.chatFont || null,
-        chatFontName: preset.chatFontName || null
+        chatFontName: preset.chatFontName || null,
+        uiFontMode: preset.uiFontMode || 'glaze',
+        chatFontMode: preset.chatFontMode || 'ui'
     };
 
     return exportData;
@@ -1085,12 +1191,14 @@ export async function importThemePreset(jsonData, defaultName) {
         charTextColor: jsonData.charTextColor || null,
         userItalicColor: jsonData.userItalicColor || null,
         charItalicColor: jsonData.charItalicColor || null,
-        uiFontSize: jsonData.uiFontSize !== undefined ? jsonData.uiFontSize : 15,
+        uiFontSize: jsonData.uiFontSize !== undefined ? jsonData.uiFontSize : 'system',
         uiLetterSpacing: jsonData.uiLetterSpacing !== undefined ? jsonData.uiLetterSpacing : 0,
-        chatFontSize: jsonData.chatFontSize !== undefined ? jsonData.chatFontSize : 15,
+        chatFontSize: jsonData.chatFontSize !== undefined ? jsonData.chatFontSize : 'system',
         chatLetterSpacing: jsonData.chatLetterSpacing !== undefined ? jsonData.chatLetterSpacing : 0,
         chatFont: jsonData.chatFont || null,
         chatFontName: jsonData.chatFontName || null,
+        uiFontMode: jsonData.uiFontMode || (jsonData.customFont ? 'custom' : 'glaze'),
+        chatFontMode: jsonData.chatFontMode || (jsonData.chatFont ? 'custom' : 'ui'),
         uiTextColor: jsonData.uiTextColor || null,
         uiTextGrayColor: jsonData.uiTextGrayColor || null,
         borderWidth: jsonData.borderWidth !== undefined ? jsonData.borderWidth : 1,

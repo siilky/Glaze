@@ -26,7 +26,7 @@
 }
 
 .menu-text {
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
     color: var(--text-gray);
     margin-left: 12px;
     transition: color 0.3s ease;
@@ -34,7 +34,7 @@
 
 .menu-value {
     margin-left: auto;
-    font-size: 14px;
+    font-size: calc(var(--ui-font-size, 15px) - 1px);
     color: var(--text-gray);
     opacity: 0.8;
 }
@@ -49,7 +49,7 @@
 
 .section-header {
     padding: 16px 16px 12px;
-    font-size: 18px;
+    font-size: calc(var(--ui-font-size, 15px) + 3px);
     color: var(--text-black);
     font-weight: 700;
     background: transparent;
@@ -63,7 +63,7 @@
 .range-row label {
     display: block;
     margin-bottom: 6px;
-    font-size: 14px;
+    font-size: calc(var(--ui-font-size, 15px) - 1px);
     color: var(--text-gray);
     transition: color 0.3s ease;
 }
@@ -82,7 +82,7 @@
 }
 
 .settings-desc {
-    font-size: 12px;
+    font-size: calc(var(--ui-font-size, 15px) - 3px);
     color: var(--text-gray);
     opacity: 0.7;
     margin-top: 2px;
@@ -106,7 +106,7 @@
     border-radius: 8px;
     border: 1px solid var(--border-color);
     color: var(--text-black);
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
     outline: none;
     transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
@@ -132,7 +132,7 @@
     border: 1px solid var(--border-color);
     background-color: var(--bg-gray);
     color: var(--text-black);
-    font-size: 14px;
+    font-size: calc(var(--ui-font-size, 15px) - 1px);
     text-align: right;
     outline: none;
     transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
@@ -224,7 +224,7 @@
     cursor: pointer;
     color: var(--text-black);
     font-weight: 600;
-    font-size: 16px;
+    font-size: calc(var(--ui-font-size, 15px) + 1px);
 }
 
 .header-action-btn {
@@ -235,6 +235,6 @@
     justify-content: center;
     border-radius: 50%;
     cursor: pointer;
-    font-size: 20px;
+    font-size: calc(var(--ui-font-size, 15px) + 5px);
     color: var(--vk-blue);
 }
