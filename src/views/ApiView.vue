@@ -451,17 +451,15 @@ onBeforeUnmount(() => {
 <template>
     <SheetView ref="sheet" :title="headerState.title">
         <div class="gen-sheet-body">
+                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                    <div class="preset-selector" @click="openApiPresetSelector">
+                        <span>{{ activeApiPreset?.name || 'Default' }}</span>
+                        <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                </ConnectionStatus>
+
                 <div class="menu-group">
-                    <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
-                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <span class="section-header" style="margin: 0; padding: 0; background: none; border: none; box-shadow: none;">{{ t('section_connection') || 'Connection' }}</span>
-                            <HelpTip term="api"/>
-                            <div class="preset-selector" @click="openApiPresetSelector" style="margin-left: 4px;">
-                                <span>{{ activeApiPreset?.name || 'Default' }}</span>
-                                <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
-                        </div>
-                    </ConnectionStatus>
+                    <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
                     <div class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -521,7 +519,7 @@ onBeforeUnmount(() => {
 
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
-                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }}</label>
+                            <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }} <HelpTip term="image-gen"/></label>
                             <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
