@@ -2034,10 +2034,12 @@ function normalizeImgGenHtmlForEditing(text, iigMap) {
 function prepareEditText(text, iigMap) {
     text = normalizeImgGenHtmlForEditing(text, iigMap);
 
+    // Only shorten src for imggen canonical tags (data-iig-instruction + src="[IMG:GEN]").
+    // Regular <img> tags with normal links or base64 are left completely untouched.
     const map = {};
     let idx = 0;
     const cleaned = text.replace(
-        /(<img\b[^>]*\bsrc=")([^"]{256,})("[^>]*>)/gi,
+        /(<img\b[^>]*\bdata-iig-instruction=[^>]*\bsrc=")([^"]{256,})("[^>]*>)/gi,
         (match, before, src, after) => {
             const key = `[IMG:SRC:${idx}]`;
             map[key] = src;
