@@ -527,6 +527,15 @@ const sortedPresetEntries = computed(() => {
         .sort(comparePresetEntries);
 });
 
+// Pre-computed token cache for the preset list — avoids calling getPresetTokens per card on every render
+const presetTokenCache = computed(() => {
+    const cache = {};
+    for (const [id, preset] of Object.entries(presetState.presets)) {
+        cache[id] = getPresetTokens(preset);
+    }
+    return cache;
+});
+
 // Get connection type for a preset relative to current char/chat
 function getPresetConnectionType(presetId) {
     const charId = props.activeChatChar?.id;
@@ -1981,7 +1990,7 @@ onBeforeUnmount(() => {
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">
                             <div class="ps-card-badge" :class="{ 'ps-with-bg': !!preset.image }">
                                 <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                {{ getPresetTokens(preset) }}
+                                {{ presetTokenCache[id] }}
                             </div>
                             <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
                                 <span v-if="preset.author">by {{ preset.author }}</span>
@@ -3616,32 +3625,32 @@ onBeforeUnmount(() => {
 }
 /* ── Sub-view Slide Animations ── */
 .ps-fwd-enter-active {
-    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.12s ease;
 }
 .ps-fwd-leave-active {
-    transition: transform 0.16s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease;
+    transition: transform 0.1s cubic-bezier(0.4, 0, 1, 1), opacity 0.1s ease;
 }
 .ps-fwd-enter-from {
-    transform: translateX(40px);
+    transform: translateX(30px);
     opacity: 0;
 }
 .ps-fwd-leave-to {
-    transform: translateX(-30px);
+    transform: translateX(-20px);
     opacity: 0;
 }
 
 .ps-back-enter-active {
-    transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.22s ease;
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.12s ease;
 }
 .ps-back-leave-active {
-    transition: transform 0.16s cubic-bezier(0.4, 0, 1, 1), opacity 0.16s ease;
+    transition: transform 0.1s cubic-bezier(0.4, 0, 1, 1), opacity 0.1s ease;
 }
 .ps-back-enter-from {
-    transform: translateX(-40px);
+    transform: translateX(-30px);
     opacity: 0;
 }
 .ps-back-leave-to {
-    transform: translateX(30px);
+    transform: translateX(20px);
     opacity: 0;
 }
 </style>
