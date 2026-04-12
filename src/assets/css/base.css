@@ -1,9 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-html {
-    height: 100%;
-}
-
 * {
     box-sizing: border-box;
     margin: 0;
@@ -37,6 +33,14 @@ html {
     /* Прозрачность плашек (чем меньше, тем лучше видно размытие) */
 
     --ui-bg-default-rgb: 30, 30, 30;
+}
+
+html {
+    position: fixed;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
 }
 
 body {
