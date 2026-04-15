@@ -16,6 +16,7 @@ import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { generateSyncKey, hasSyncKey, restoreKeyFromPhrase } from '@/core/services/crypto/keyManager.js';
 import { fullPush, fullPull, fullSync, checkSyncReadiness } from '@/core/services/syncService.js';
+import { cloudHasData, wipeCloudData } from '@/core/services/syncEngine.js';
 
 const sheet = ref(null);
 defineProps({ zIndex: { type: Number, default: 1005 } });
@@ -30,9 +31,12 @@ const recoveryPhrase = ref('');
 const showRestorePhrase = ref(false);
 const restorePhraseInput = ref('');
 const isRestoringKey = ref(false);
+const restoreError = ref('');
+const restoreSuccess = ref(false);
 const localSyncStatus = ref('');
 const syncResult = ref(null);
 const isSyncing = ref(false);
+const isWiping = ref(false);
 
 const providerLabel = computed(() => {
     if (!syncProvider.value) return '';
@@ -66,6 +70,12 @@ function formatTimeAgo(ts) {
     return `${Math.floor(diff / 86400)}d ${t('sync_ago') || 'ago'}`;
 }
 
+const getAdapter = () => {
+    if (syncProvider.value === PROVIDERS.DROPBOX) return dropboxAdapter;
+    if (syncProvider.value === PROVIDERS.GDRIVE) return gdriveAdapter;
+    return null;
+};
+
 const connectDropbox = async () => {
     isConnecting.value = true;
     try {
@@ -73,8 +83,7 @@ const connectDropbox = async () => {
         setProvider(PROVIDERS.DROPBOX);
         const info = await dropboxAdapter.getAccountInfo();
         accountInfo.value = info;
-        const ready = await checkSyncReadiness();
-        localSyncStatus.value = ready.ready ? 'connected' : 'no_key';
+        await afterConnect();
     } catch (e) {
         console.error('[SyncSheet] Dropbox connect failed:', e);
         setSyncError(e.message);
@@ -91,14 +100,33 @@ const connectGdrive = async () => {
         setProvider(PROVIDERS.GDRIVE);
         const info = await gdriveAdapter.getAccountInfo();
         accountInfo.value = info;
-        const ready = await checkSyncReadiness();
-        localSyncStatus.value = ready.ready ? 'connected' : 'no_key';
+        await afterConnect();
     } catch (e) {
         console.error('[SyncSheet] Google Drive connect failed:', e);
         setSyncError(e.message);
         alert(e.message);
     } finally {
         isConnectingGdrive.value = false;
+    }
+};
+
+const afterConnect = async () => {
+    const hasKey = await hasSyncKey();
+    if (hasKey) {
+        localSyncStatus.value = 'connected';
+        restoreSuccess.value = false;
+        return;
+    }
+
+    const adapter = getAdapter();
+    if (!adapter) return;
+
+    const hasCloudData = await cloudHasData(adapter);
+    if (hasCloudData) {
+        localSyncStatus.value = 'no_key';
+        startRestore();
+    } else {
+        localSyncStatus.value = 'no_key';
     }
 };
 
@@ -140,18 +168,27 @@ const confirmRecoveryPhrase = () => {
 
 const startRestore = () => {
     restorePhraseInput.value = '';
+    restoreError.value = '';
     showRestorePhrase.value = true;
 };
 
 const doRestore = async () => {
     if (!restorePhraseInput.value.trim()) return;
     isRestoringKey.value = true;
+    restoreError.value = '';
     try {
+        console.log('[SyncSheet] Restoring key from phrase...');
         await restoreKeyFromPhrase(restorePhraseInput.value.trim());
+        console.log('[SyncSheet] Key restored successfully');
         showRestorePhrase.value = false;
-        localSyncStatus.value = 'connected';
+        if (syncProvider.value) {
+            localSyncStatus.value = 'connected';
+        } else {
+            restoreSuccess.value = true;
+        }
     } catch (e) {
-        alert(t('sync_invalid_phrase') || 'Invalid recovery phrase. Check your 12 words and try again.');
+        console.error('[SyncSheet] Key restore failed:', e);
+        restoreError.value = e.message || 'Invalid recovery phrase';
     } finally {
         isRestoringKey.value = false;
     }
@@ -218,13 +255,36 @@ const doFullSync = async () => {
     }
 };
 
+const doWipe = async () => {
+    if (!confirm(t('sync_confirm_wipe') || 'Delete ALL data from cloud? This cannot be undone. Your local data will remain intact.')) return;
+    if (!confirm(t('sync_confirm_wipe_final') || 'Are you sure? Type the provider name to confirm.')) return;
+    isWiping.value = true;
+    syncResult.value = null;
+    try {
+        const adapter = getAdapter();
+        if (!adapter) throw new Error('No provider connected');
+        const result = await wipeCloudData(adapter);
+        syncResult.value = { type: 'wipe', ...result };
+    } catch (e) {
+        console.error('[SyncSheet] Wipe failed:', e);
+        setSyncError(e.message);
+    } finally {
+        isWiping.value = false;
+    }
+};
+
 const openConflictSheet = () => {
     window.dispatchEvent(new CustomEvent('open-conflict-sheet'));
 };
 
-const open = () => {
-    localSyncStatus.value = '';
+const open = async () => {
     syncResult.value = null;
+    if (syncProvider.value) {
+        const hasKey = await hasSyncKey();
+        localSyncStatus.value = hasKey ? 'connected' : 'no_key';
+    } else {
+        localSyncStatus.value = '';
+    }
     sheet.value?.open();
 };
 const close = () => sheet.value?.close();
@@ -268,6 +328,10 @@ onMounted(async () => {
                     <div v-if="syncLastError && !syncProvider" class="sync-error-msg">
                         {{ syncLastError }}
                     </div>
+
+                    <div v-if="restoreSuccess" class="sync-result-card">
+                        Key restored! Now connect your cloud provider above.
+                    </div>
                 </div>
 
                 <div class="bs-separator"></div>
@@ -303,6 +367,7 @@ onMounted(async () => {
                     <div v-if="syncResult" class="sync-result-card" :class="syncResult.type">
                         <span v-if="syncResult.type === 'push'">{{ t('sync_push_result') || 'Pushed' }}: {{ syncResult.pushed }} {{ t('sync_items') || 'items' }}</span>
                         <span v-else-if="syncResult.type === 'pull'">{{ t('sync_pull_result') || 'Pulled' }}: {{ syncResult.pulled }} {{ t('sync_items') || 'items' }}, {{ syncResult.conflicts.length }} {{ t('sync_conflicts') || 'conflicts' }}</span>
+                        <span v-else-if="syncResult.type === 'wipe'">{{ t('sync_wipe_result') || 'Deleted' }}: {{ syncResult.deleted }}/{{ syncResult.total }} {{ t('sync_items') || 'items' }}</span>
                         <span v-else>{{ t('sync_full_done') || 'Full sync complete' }}</span>
                     </div>
                 </div>
@@ -322,6 +387,10 @@ onMounted(async () => {
                     <button class="bs-btn bs-primary-btn" @click="setupEncryption">
                         <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
                         <span>{{ t('sync_setup_encryption') || 'Set Up Encryption' }}</span>
+                    </button>
+                    <button class="bs-btn bs-secondary-btn" @click="startRestore">
+                        <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
+                        <span>{{ t('sync_restore_key') || 'Restore from Recovery Phrase' }}</span>
                     </button>
                 </div>
 
@@ -364,6 +433,10 @@ onMounted(async () => {
                         <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
                         <span>{{ t('sync_disconnect') || 'Disconnect' }}</span>
                     </button>
+                    <button class="bs-btn bs-danger-btn" style="margin-top:8px; background: rgba(255,59,48,0.05); opacity:0.8" @click="doWipe" :disabled="isWiping">
+                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                        <span>{{ isWiping ? (t('sync_wiping') || 'Deleting...') : (t('sync_wipe_cloud') || 'Wipe Cloud Data') }}</span>
+                    </button>
                 </div>
             </div>
 
@@ -386,7 +459,8 @@ onMounted(async () => {
                 <div class="bs-modal">
                     <div class="bs-modal-title">{{ t('sync_restore_title') || 'Enter Recovery Phrase' }}</div>
                     <div class="bs-modal-desc">{{ t('sync_restore_desc') || 'Enter the 12-word recovery phrase from when you first set up encryption.' }}</div>
-                    <textarea v-model="restorePhraseInput" class="restore-input" placeholder="word1 word2 word3..." rows="3"></textarea>
+                    <textarea v-model="restorePhraseInput" class="restore-input" placeholder="word1 word2 word3..." rows="3" @keydown.enter.prevent="doRestore"></textarea>
+                    <div v-if="restoreError" class="sync-error-msg">{{ restoreError }}</div>
                     <button class="bs-btn bs-primary-btn" @click="doRestore" :disabled="isRestoringKey || !restorePhraseInput.trim()" style="width:100%">
                         {{ isRestoringKey ? (t('sync_restoring') || 'Restoring...') : (t('sync_restore_btn') || 'Restore Key') }}
                     </button>

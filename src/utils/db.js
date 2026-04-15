@@ -1,5 +1,5 @@
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';

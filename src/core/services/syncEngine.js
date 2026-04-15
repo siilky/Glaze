@@ -50,6 +50,15 @@ async function decryptEntity(encrypted, key) {
     return decryptFromSync(encrypted, key);
 }
 
+export async function cloudHasData(adapter) {
+    try {
+        const result = await adapter.download(cloudPath(ENTITY_TYPES.MANIFEST));
+        return result !== null;
+    } catch {
+        return false;
+    }
+}
+
 export async function buildManifest(lastSync, deviceId) {
     return {
         version: 1,
@@ -154,6 +163,7 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
     let conflicts = [];
 
     const charFiles = cloudFiles.filter(f => f.path.startsWith(`${CLOUD_BASE}/characters/`));
+    const charErrors = [];
     for (let i = 0; i < charFiles.length; i++) {
         const file = charFiles[i];
         const charId = file.path.replace(`${CLOUD_BASE}/characters/`, '').replace('.enc', '');
@@ -166,8 +176,16 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
             continue;
         }
 
-        const encrypted = JSON.parse(downloadResult.data);
-        const cloudEntity = await decryptEntity(encrypted, key);
+        let cloudEntity;
+        try {
+            const encrypted = JSON.parse(downloadResult.data);
+            cloudEntity = await decryptEntity(encrypted, key);
+        } catch (e) {
+            console.warn(`[syncEngine] Failed to decrypt character ${charId}:`, e);
+            charErrors.push({ type: ENTITY_TYPES.CHARACTER, id: charId, error: e.message });
+            if (onProgress) onProgress('characters', i + 1, charFiles.length);
+            continue;
+        }
 
         if (localChar && localChar.updatedAt && localChar.updatedAt > cloudModified) {
             if (onConflict) {
@@ -193,8 +211,15 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
             continue;
         }
 
-        const encrypted = JSON.parse(downloadResult.data);
-        const cloudEntity = await decryptEntity(encrypted, key);
+        let cloudEntity;
+        try {
+            const encrypted = JSON.parse(downloadResult.data);
+            cloudEntity = await decryptEntity(encrypted, key);
+        } catch (e) {
+            console.warn(`[syncEngine] Failed to decrypt persona ${personaId}:`, e);
+            if (onProgress) onProgress('personas', i + 1, personaFiles.length);
+            continue;
+        }
 
         if (localPersona && localPersona.updatedAt && localPersona.updatedAt > cloudModified) {
             if (onConflict) {
@@ -220,8 +245,15 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
             continue;
         }
 
-        const encrypted = JSON.parse(downloadResult.data);
-        const cloudEntity = await decryptEntity(encrypted, key);
+        let cloudEntity;
+        try {
+            const encrypted = JSON.parse(downloadResult.data);
+            cloudEntity = await decryptEntity(encrypted, key);
+        } catch (e) {
+            console.warn(`[syncEngine] Failed to decrypt chat ${charId}:`, e);
+            if (onProgress) onProgress('chats', i + 1, chatFiles.length);
+            continue;
+        }
         const chatName = getChatName(localChat, cloudEntity, charId);
 
         if (localChat && localChat.updatedAt && localChat.updatedAt > cloudModified) {
@@ -246,16 +278,20 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
         const { path, key: dbKey } = singletonFiles[i];
         const result = await adapter.download(path);
         if (result) {
-            const encrypted = JSON.parse(result.data);
-            const decrypted = await decryptEntity(encrypted, key);
-            if (dbKey) {
-                await db.queuedSet(dbKey, decrypted);
-            } else {
-                for (const [lsKey, lsVal] of Object.entries(decrypted)) {
-                    localStorage.setItem(lsKey, lsVal);
+            try {
+                const encrypted = JSON.parse(result.data);
+                const decrypted = await decryptEntity(encrypted, key);
+                if (dbKey) {
+                    await db.queuedSet(dbKey, decrypted);
+                } else {
+                    for (const [lsKey, lsVal] of Object.entries(decrypted)) {
+                        localStorage.setItem(lsKey, lsVal);
+                    }
                 }
+                pulled++;
+            } catch (e) {
+                console.warn(`[syncEngine] Failed to decrypt ${path}:`, e);
             }
-            pulled++;
         }
         if (onProgress) onProgress('settings', i + 1, singletonFiles.length);
     }
@@ -334,6 +370,26 @@ function getChatName(localChat, cloudChat, charId) {
         return preview || charId;
     }
     return charId;
+}
+
+export async function wipeCloudData(adapter, onProgress) {
+    const files = await listAllFiles(adapter);
+    let deleted = 0;
+    let failed = 0;
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        try {
+            await adapter.deleteFile(file.path_display || file.path);
+            deleted++;
+        } catch (e) {
+            console.warn(`[syncEngine] Failed to delete ${file.path}:`, e);
+            failed++;
+        }
+        if (onProgress) onProgress(i + 1, files.length);
+    }
+
+    return { deleted, failed, total: files.length };
 }
 
 export async function resolveConflict(conflict, choice) {

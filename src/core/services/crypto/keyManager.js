@@ -1,19 +1,20 @@
-import { generateAesKey, exportKey, importKey, encrypt, decrypt, deriveKeyFromPassword, generateSalt, arrayBufferToBase64, base64ToArrayBuffer } from './syncCrypto.js';
+import { exportKey, importKey, encrypt, decrypt, deriveKeyFromPassword, arrayBufferToBase64, base64ToArrayBuffer } from './syncCrypto.js';
 import { db } from '@/utils/db.js';
 
 const KEY_STORAGE_KEY = 'gz_sync_key';
 const SALT_STORAGE_KEY = 'gz_sync_salt';
 
-import { generateMnemonic, mnemonicToEntropy, validateMnemonic } from '@scure/bip39';
+import { generateMnemonic, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
-export async function generateSyncKey() {
-    const key = await generateAesKey();
-    const exportedKey = await exportKey(key);
-    const salt = generateSalt(16);
-    const saltBase64 = arrayBufferToBase64(salt.buffer);
+const SYNC_SALT = new TextEncoder().encode('GlazeSync-v1-derivation');
 
+export async function generateSyncKey() {
     const mnemonic = generateMnemonic(wordlist, 128);
+
+    const key = await deriveKeyFromPassword(mnemonic, SYNC_SALT);
+    const exportedKey = await exportKey(key);
+    const saltBase64 = arrayBufferToBase64(SYNC_SALT.buffer);
 
     await db.queuedSet(KEY_STORAGE_KEY, exportedKey);
     await db.queuedSet(SALT_STORAGE_KEY, saltBase64);
@@ -21,7 +22,7 @@ export async function generateSyncKey() {
     return {
         key,
         recoveryPhrase: mnemonic,
-        salt
+        salt: SYNC_SALT
     };
 }
 
@@ -43,37 +44,23 @@ export async function hasSyncKey() {
 
 export async function restoreKeyFromPhrase(mnemonic) {
     const trimmed = mnemonic.trim().toLowerCase();
+    console.log('[keyManager] restoreKeyFromPhrase, words:', trimmed.split(/\s+/).length);
 
-    if (!validateMnemonic(trimmed, wordlist)) {
+    const valid = validateMnemonic(trimmed, wordlist);
+    console.log('[keyManager] validateMnemonic result:', valid);
+
+    if (!valid) {
         throw new Error('Invalid recovery phrase. Please check your 12-word phrase and try again.');
     }
 
-    const entropy = mnemonicToEntropy(trimmed, wordlist);
-    const entropyBytes = hexToBytes(entropy);
-
-    const encoder = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        encoder.encode(trimmed),
-        'PBKDF2',
-        false,
-        ['deriveKey']
-    );
-
-    const existingSalt = await db.get(SALT_STORAGE_KEY);
-    let salt;
-    if (existingSalt) {
-        salt = new Uint8Array(base64ToArrayBuffer(existingSalt));
-    } else {
-        salt = generateSalt(16);
-        await db.queuedSet(SALT_STORAGE_KEY, arrayBufferToBase64(salt.buffer));
-    }
-
-    const derivedKey = await deriveKeyFromPassword(trimmed, salt);
+    const derivedKey = await deriveKeyFromPassword(trimmed, SYNC_SALT);
     const exportedDerived = await exportKey(derivedKey);
+    const saltBase64 = arrayBufferToBase64(SYNC_SALT.buffer);
 
     await db.queuedSet(KEY_STORAGE_KEY, exportedDerived);
+    await db.queuedSet(SALT_STORAGE_KEY, saltBase64);
 
+    console.log('[keyManager] Key restored and saved');
     return derivedKey;
 }
 
@@ -96,10 +83,4 @@ export async function decryptFromSync(encrypted, key) {
     return decrypt(encrypted, key);
 }
 
-function hexToBytes(hex) {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-        bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return bytes;
-}
+
