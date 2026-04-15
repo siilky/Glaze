@@ -189,15 +189,14 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
     let candidates = [];
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
-            if (entry.enabled !== false) {
-                // Character Filter check
+            if (entry.enabled !== false && !entry.vectorSearch) {
                 if (char && entry.characterFilter) {
                     const { isExclude, names } = entry.characterFilter;
                     if (names && names.length > 0) {
                         const charName = (char.name || "").toLowerCase();
                         const isInCategory = names.some(n => charName.includes(n.toLowerCase()));
-                        if (isExclude && isInCategory) return; // Excluded
-                        if (!isExclude && !isInCategory) return; // Not in allowed list
+                        if (isExclude && isInCategory) return;
+                        if (!isExclude && !isInCategory) return;
                     }
                 }
                 candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
@@ -518,48 +517,58 @@ export async function indexLorebookEntry(entry, lorebookId) {
     });
 }
 
-export async function indexLorebookEntries(lorebookId) {
+export async function indexLorebookEntries(lorebookId, onProgress) {
     const lb = lorebookState.lorebooks.find(l => l.id === lorebookId);
-    if (!lb) return;
+    if (!lb) return { indexed: 0, skipped: 0, failed: 0, total: 0 };
 
     const entries = lb.entries.filter(e => e.enabled !== false && e.vectorSearch);
-    if (entries.length === 0) return;
+    if (entries.length === 0) return { indexed: 0, skipped: 0, failed: 0, total: 0 };
 
     const config = getEmbeddingConfig();
-    const texts = entries.map(entry => {
-        const text = config.target === 'keys'
+    let indexed = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const text = (config.target === 'keys'
             ? (entry.keys || []).join(', ')
-            : (entry.content || '');
-        return text.trim();
-    });
+            : (entry.content || '')).trim();
 
-    const nonEmpty = [];
-    const nonEmptyEntries = [];
-    for (let i = 0; i < texts.length; i++) {
-        if (texts[i]) {
-            nonEmpty.push(texts[i]);
-            nonEmptyEntries.push(entries[i]);
+        if (!text) { failed++; if (onProgress) onProgress(i + 1, entries.length); continue; }
+
+        const textHash = await computeTextHash(text);
+        const existing = await db.getEmbedding(entry.id);
+        if (existing && existing.textHash === textHash) {
+            skipped++;
+            if (onProgress) onProgress(i + 1, entries.length);
+            continue;
         }
+
+        try {
+            const vectors = await getEmbeddings([text]);
+            if (vectors && vectors[0]) {
+                await db.saveEmbedding({
+                    id: entry.id,
+                    sourceType: 'lorebook_entry',
+                    sourceId: lorebookId,
+                    vector: vectors[0],
+                    textHash,
+                    updatedAt: Date.now()
+                });
+                indexed++;
+            } else {
+                failed++;
+            }
+        } catch (e) {
+            console.warn('[indexLorebookEntries] Failed for entry', entry.id, e);
+            failed++;
+        }
+
+        if (onProgress) onProgress(i + 1, entries.length);
     }
 
-    if (nonEmpty.length === 0) return;
-
-    const vectors = await getEmbeddings(nonEmpty);
-    if (!vectors) return;
-
-    for (let i = 0; i < nonEmptyEntries.length; i++) {
-        if (!vectors[i]) continue;
-
-        const textHash = await computeTextHash(nonEmpty[i]);
-        await db.saveEmbedding({
-            id: nonEmptyEntries[i].id,
-            sourceType: 'lorebook_entry',
-            sourceId: lorebookId,
-            vector: vectors[i],
-            textHash,
-            updatedAt: Date.now()
-        });
-    }
+    return { indexed, skipped, failed, total: entries.length };
 }
 
 export async function getEmbeddingStatus(entryId) {

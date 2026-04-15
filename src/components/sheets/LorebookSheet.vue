@@ -125,6 +125,19 @@ const searchQuery = ref('');
 const isGlobalSettingsExpanded = ref(false);
 const indexingEntry = ref(false);
 const entryEmbeddingStatus = ref('none');
+const indexProgress = ref(null);
+const indexedEntryIds = ref(new Set());
+
+const allVectorEnabled = computed(() => {
+    if (!activeLorebook.value || activeLorebook.value.entries.length === 0) return false;
+    return activeLorebook.value.entries.every(e => e.vectorSearch);
+});
+
+function toggleAllVector() {
+    if (!activeLorebook.value) return;
+    const enable = !allVectorEnabled.value;
+    activeLorebook.value.entries.forEach(e => { e.vectorSearch = enable; });
+}
 
 const currentContext = ref({ charId: null, chatId: null });
 
@@ -258,8 +271,13 @@ async function handleIndexEntry() {
 async function handleIndexAllEntries() {
     if (!activeLorebook.value) return;
     indexingEntry.value = true;
+    indexProgress.value = null;
     try {
-        await indexLorebookEntries(activeLorebook.value.id);
+        const result = await indexLorebookEntries(activeLorebook.value.id, (done, total) => {
+            indexProgress.value = { done, total };
+        });
+        indexProgress.value = result;
+        await loadIndexedStatuses();
     } catch (e) {
         console.warn('Failed to index lorebook:', e);
     } finally {
@@ -423,6 +441,20 @@ function selectLorebook(lb) {
     activeLorebook.value = lb;
     currentView.value = 'entries';
     searchQuery.value = '';
+    indexProgress.value = null;
+    loadIndexedStatuses();
+}
+
+async function loadIndexedStatuses() {
+    if (!activeLorebook.value) return;
+    const ids = new Set();
+    for (const entry of activeLorebook.value.entries) {
+        if (entry.vectorSearch && entry.id) {
+            const status = await getEmbeddingStatus(entry.id);
+            if (status === 'indexed') ids.add(entry.id);
+        }
+    }
+    indexedEntryIds.value = ids;
 }
 
 function handleLorebookMenu(lb) {
@@ -637,13 +669,33 @@ defineExpose({ open, openEntry, close, openLorebook });
             <!-- View: Entries -->
             <div v-else-if="currentView === 'entries'" class="view-wrapper">
 
+                <div v-if="activeLorebook && activeLorebook.entries.length > 0" class="entries-toolbar">
+                    <button class="toolbar-btn" @click="toggleAllVector">
+                        <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        <span>{{ allVectorEnabled ? t('btn_disable_vector_all') : t('btn_enable_vector_all') }}</span>
+                    </button>
+                    <button class="toolbar-btn" @click="handleIndexAllEntries" :disabled="indexingEntry">
+                        <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+                        <span v-if="indexingEntry && indexProgress?.total">{{ t('index_progress').replace('{done}', indexProgress.done).replace('{total}', indexProgress.total) }}</span>
+                        <span v-else-if="indexingEntry">{{ t('btn_indexing') }}</span>
+                        <span v-else>{{ t('btn_index_all') }}</span>
+                    </button>
+                    <span v-if="!indexingEntry && indexProgress && indexProgress.indexed !== undefined" class="index-result">
+                        {{ t('index_done').replace('{count}', indexProgress.indexed) }}<span v-if="indexProgress.skipped > 0">{{ t('index_skipped').replace('{skipped}', indexProgress.skipped) }}</span><span v-if="indexProgress.failed > 0" style="color: #ff3b30;">{{ t('index_failed').replace('{failed}', indexProgress.failed) }}</span>
+                    </span>
+                </div>
+
                 <div v-if="filteredEntries.length === 0" class="empty-state">
                     <div class="empty-text">{{ t('no_entries_found') }}</div>
                 </div>
                 <div v-else class="list-container">
                     <div v-for="(entry, index) in filteredEntries" :key="index" class="lb-item" @click="selectEntry(entry, index)">
                         <div class="lb-info">
-                            <div class="lb-name">{{ entry.comment || t('unnamed_entry') }}</div>
+                            <div class="lb-name-row">
+                                <span class="lb-name">{{ entry.comment || t('unnamed_entry') }}</span>
+                                <span v-if="entry.vectorSearch" class="conn-badge vector">vec</span>
+                                <span v-if="entry.vectorSearch && indexedEntryIds.has(entry.id)" class="conn-badge indexed">idx</span>
+                            </div>
                             <div class="lb-meta preview-text">{{ entry.keys.join(', ') || t('no_keys') }}</div>
                         </div>
                         <div class="lb-actions">
@@ -767,18 +819,16 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <div class="clickable-selector" @click="openOptionSelector({
                                 title: t('label_injection_position'),
                                 options: [
-                                    { value: 4, label: t('pos_top') },
                                     { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
-                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
-                                    { value: 2, label: t('pos_before_examples') },
-                                    { value: 3, label: t('pos_after_examples') }
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' }
                                 ],
                                 currentValue: activeEntry.position,
                                 onSelect: (v) => activeEntry.position = v
                             })">
-                                <span>{{ activeEntry.position === 4 ? t('pos_top') : activeEntry.position === 'worldInfoBefore' ? '@worldInfoBefore' : activeEntry.position === 'worldInfoAfter' ? '@worldInfoAfter' : activeEntry.position === 2 ? t('pos_before_examples') : t('pos_after_examples') }}</span>
+                                <span>{{ activeEntry.position === 'worldInfoBefore' ? '@worldInfoBefore' : '@worldInfoAfter' }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
+                            <div class="settings-desc" style="margin-top: 6px;">{{ t('hint_lorebook_macro_override') }}</div>
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_order_priority') }} <span class="hint">{{ t('hint_lower_first') }}</span></label>
@@ -811,20 +861,20 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_vector_search') || 'Vector Search' }}</div>
+                    <div class="section-header">{{ t('section_vector_search') }}</div>
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
-                                <label>{{ t('label_vector_search') || 'Enable Vector Search' }}</label>
-                                <div class="settings-desc">{{ t('desc_vector_search_entry') || 'Match this entry by semantic similarity instead of keywords' }}</div>
+                                <label>{{ t('label_vector_search') }}</label>
+                                <div class="settings-desc">{{ t('desc_vector_search_entry') }}</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.vectorSearch" class="vk-switch">
                         </div>
                         <div v-if="activeEntry.vectorSearch" class="settings-item">
                             <button class="vk-btn-action" style="width:100%;" @click="handleIndexEntry" :disabled="indexingEntry">
-                                {{ indexingEntry ? (t('btn_indexing') || 'Indexing...') : (t('btn_index_entry') || 'Index Entry') }}
+                                {{ indexingEntry ? t('btn_indexing') : t('btn_index_entry') }}
                             </button>
-                            <div v-if="entryEmbeddingStatus === 'indexed'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('entry_indexed') || 'Indexed' }}</div>
-                            <div v-if="entryEmbeddingStatus === 'none'" class="settings-desc" style="margin-top:8px; color: var(--text-gray);">{{ t('entry_not_indexed') || 'Not indexed' }}</div>
+                            <div v-if="entryEmbeddingStatus === 'indexed'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('entry_indexed') }}</div>
+                            <div v-if="entryEmbeddingStatus === 'none'" class="settings-desc" style="margin-top:8px; color: var(--text-gray);">{{ t('entry_not_indexed') }}</div>
                         </div>
                 </div>
 
@@ -1207,6 +1257,49 @@ defineExpose({ open, openEntry, close, openLorebook });
 .conn-badge.global { color: #34c759; background: rgba(52, 199, 89, 0.12); }
 .conn-badge.char { color: #af52de; background: rgba(175, 82, 222, 0.12); }
 .conn-badge.chat { color: #ff9500; background: rgba(255, 149, 0, 0.12); }
+.conn-badge.vector { color: #5ac8fa; background: rgba(90, 200, 250, 0.12); font-size: 10px; padding: 1px 6px; }
+.conn-badge.indexed { color: #34c759; background: rgba(52, 199, 89, 0.12); font-size: 10px; padding: 1px 6px; }
+
+.entries-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    overflow-x: auto;
+}
+
+.toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text-gray);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.toolbar-btn:active { background: rgba(255, 255, 255, 0.12); }
+.toolbar-btn:disabled { opacity: 0.4; cursor: default; }
+.toolbar-icon { width: 16px; height: 16px; fill: currentColor; }
+
+.index-result {
+    font-size: 12px;
+    color: #34c759;
+    font-weight: 600;
+    white-space: nowrap;
+    align-self: center;
+}
+
+.lb-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
 
 .action-btn svg { width: 22px; height: 22px; fill: currentColor; }
 

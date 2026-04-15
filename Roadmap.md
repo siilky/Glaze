@@ -170,16 +170,18 @@ Implementation pieces (done):
 - `src/core/config/embeddingSettings.js` — embedding API config (endpoint, model, key, target, scanDepth, threshold, topK, maxChunkTokens), endpoint normalization, "use same as LLM" toggle
 - `src/core/services/embeddingService.js` — `getEmbedding(text)`, `getEmbeddings(texts[])`, auto-chunking, Capacitor native + web fetch, `testEmbeddingConnection()`
 - `src/utils/vectorMath.js` — `cosineSimilarity(a, b)`, `findTopK(queryVector, candidates, k, threshold)`
-- `src/utils/db.js` — new `embeddings` IndexedDB store (DB_VERSION 6), CRUD methods: `getEmbedding`, `getAllEmbeddings`, `getEmbeddingsBySource`, `saveEmbedding`, `deleteEmbedding`, `deleteEmbeddingsBySource`
-- `src/core/states/lorebookState.js` — `indexLorebookEntry`, `indexLorebookEntries`, `getEmbeddingStatus`, `vectorSearchLorebooks` (async, runs alongside keyword scan)
+- `src/utils/db.js` — `embeddings` IndexedDB store (DB_VERSION 7), CRUD methods: `getEmbedding`, `getAllEmbeddings`, `getEmbeddingsBySource`, `saveEmbedding`, `deleteEmbedding`, `deleteEmbeddingsBySource`
+- `src/core/states/lorebookState.js` — `indexLorebookEntry` (single, hash-check), `indexLorebookEntries` (bulk, per-entry hash-check, progress callback, failed count), `getEmbeddingStatus`, `vectorSearchLorebooks`; entries with `vectorSearch` flag are excluded from keyword matching
 - `src/core/services/generationService.js` — vector search merged into `generateChatResponse` after worker returns
+- `src/workers/generationWorker.js` — entries with `vectorSearch` flag excluded from `scanLorebooksPure`
 - `src/views/ApiView.vue` — embedding settings section: enable toggle, use-same-as-LLM toggle, endpoint/model/key fields, target selector, scan depth, threshold slider, topK, max chunk tokens, test connection button
-- `src/components/sheets/LorebookSheet.vue` — per-entry `vectorSearch` toggle, "Index Entry" button with status, entries menu with "Toggle All Vector" and "Index All"
+- `src/components/sheets/LorebookSheet.vue` — per-entry `vectorSearch` toggle, "Index Entry" button with status, visible toolbar with "Enable/Disable Vector All" and "Index All" buttons, progress display (X of Y), result summary (indexed/skipped/failed), `vec` + `idx` badges in entries list, injection position restricted to @worldInfoBefore/@worldInfoAfter with macro override hint
+- `src/locales/en/index.json` + `src/locales/ru/index.json` — i18n keys for vector search UI
 
 Known issues / remaining:
-- **Tokenizer builds are missing the tokenizer chunk.** The `index-*.js` grew from ~677KB to ~1646KB because the tokenizer is being duplicated into the main bundle instead of being code-split. The tokenizer-related commits from `archive/feat/tokenizer` need to be merged into this branch to fix source-based token counting and proper code splitting.
-- **Token counting may be inaccurate** without the source-based attribution from the tokenizer branch. The current `feat/vectorization` branch does NOT include the worker rewrite from `60203d9` (source-based breakdown).
-- Embedding settings i18n keys are English-only fallbacks; Russian translations needed.
+- Embedding settings in ApiView still use English-only fallbacks for some keys; Russian translations needed for ApiView embedding section.
+- **Failed embeddings** — entries where the embedding API returns null/empty are tracked as `failed` but no user-visible error message explains why (could be empty content, API error, etc.).
+- Summary simple mode prompts still need proper defaults and editability.
 
 Expected result:
 - The project gains a reusable vector layer rather than a one-off lorebook feature.
@@ -190,7 +192,7 @@ Merged with vectorization — building both together since lorebook is the prima
 
 Design answers:
 - Vector search is **per-entry** toggle (each entry can opt in).
-- Vector search **supplements** keywords — results are unioned, not replaced.
+- Vector search **replaces** keywords for entries with `vectorSearch` enabled — those entries are excluded from keyword scan and only matched via semantic similarity.
 - Number of vector matches controlled by existing lorebook reserve/budget logic.
 - Collisions handled by deduplication — if keyword match already found the entry, vector match is skipped.
 
@@ -246,15 +248,16 @@ This order is deliberate:
 ## Next Up
 
 The immediate next milestone is:
-- merge `archive/feat/tokenizer` commits into `feat/vectorization` to restore proper source-based token counting and code-split tokenizer bundle;
-- verify token counting accuracy after merge;
-- add Russian i18n for embedding settings;
-- test end-to-end: configure embedding API → index lorebook entries → generate with vector results.
+- add Russian i18n for embedding settings in ApiView;
+- investigate and fix entries that consistently fail embedding (the "4 entries re-index every time" issue);
+- test end-to-end: configure embedding API → index lorebook entries → generate with vector results;
+- summary simple mode prompts — proper defaults and editability.
 
 ## Resume Notes
 
 When returning to this roadmap after unrelated work:
 - do not reopen rejected tokenizer / reserve ideas unless there is a new explicit decision;
-- `archive/feat/tokenizer` preserves the 4 tokenizer commits — they need to be merged into the working branch;
-- vectorization infrastructure is done on `feat/vectorization`, but token counting is broken until tokenizer commits are merged;
+- vectorization infrastructure is done on `feat/vectorization-v2` (clean branch from `upstream/dev`);
+- entries with `vectorSearch: true` are excluded from keyword matching (both `lorebookState.js` and `generationWorker.js`);
+- local `dev` branch merges both `feat/cloud-sync` and `feat/vectorization-v2` for integration testing;
 - keep future retrieval work aligned with reusable vector infrastructure, not feature-specific hacks.
