@@ -224,7 +224,10 @@ export async function generateChatResponse({
     }
 
     if (callbacks.onPromptReady) {
-        callbacks.onPromptReady({ loreEntries: result.loreEntries });
+        callbacks.onPromptReady({
+            loreEntries: result.loreEntries,
+            contextBreakdown: result.contextBreakdown || null
+        });
     }
 
     let messages = result.messages;
@@ -369,17 +372,30 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         }));
 
         const result = await processPromptAsync(payload);
-        return result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+
+        const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
+
+        return {
+            cutoffIndex: resolvedCutoff,
+            contextBreakdown: result.contextBreakdown || null
+        };
     } catch (e) {
         console.error("Calculate context worker error", e);
-        return 0;
+        return {
+            cutoffIndex: 0,
+            contextBreakdown: null
+        };
     }
 }
 
-export async function generateSummary({ history, prompt, controller }) {
-    const { apiKey, apiUrl, model, temp } = getEffectiveApiConfig();
+export async function generateSummary({ history, prompt, controller, apiConfigOverride = null }) {
+    const effectiveConfig = {
+        ...getEffectiveApiConfig(),
+        ...(apiConfigOverride || {})
+    };
+    const { apiKey, apiUrl, model, temp } = effectiveConfig;
 
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");

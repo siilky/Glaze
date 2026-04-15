@@ -12,6 +12,7 @@ import { db } from '@/utils/db.js';
 import { getLastPrompt } from '@/core/services/generationService.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
 import PersonasSheet from '@/views/PersonasView.vue';
 
@@ -25,6 +26,7 @@ const props = defineProps({
 const emit = defineEmits([
     'close',
     'magic-notes',
+    'magic-context',
     'magic-summary',
     'magic-sessions',
     'magic-stats',
@@ -48,6 +50,7 @@ let longPressTimer = null;
 
 const allAvailableItems = [
     { id: 'notes', i18n: 'magic_authors_notes', icon: 'M3 10h11v2H3v-2zm0-2h11V6H3v2zm0 8h7v-2H3v2zm15.01-3.13l.71-.71c.39-.39 1.02-.39 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71-2.12-2.12zm-.71.71l-5.3 5.3V21h2.12l5.3-5.3-2.12-2.12z', event: 'magic-notes' },
+    { id: 'context', i18n: 'label_tokenizer', fallback: 'Tokenizer', icon: 'M4 11h16v2H4zm0-6h16v2H4zm0 12h10v2H4z', event: 'magic-context' },
     { id: 'summary', i18n: 'magic_summary', icon: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z', event: 'magic-summary' },
     { id: 'sessions', i18n: 'history_title', fallback: 'Sessions', icon: 'M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z', event: 'magic-sessions' },
     { id: 'stats', i18n: 'action_chat_stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z', event: 'magic-stats' },
@@ -308,18 +311,19 @@ const effectivePersonaName = computed(() => {
 
 const resolveBlockContent = (block, preset, activeChar, persona, history) => {
     if (!block) return '';
-    if (block.id === 'chat_history') {
+    const blockId = normalizeBlockId(block.id);
+    if (blockId === 'chat_history') {
         if (!history || history.length === 0) return '';
         return history.map(m => `${m.role === 'user' ? (persona?.name || 'User') : (activeChar?.name || 'Char')}: ${m.text}`).join('\n');
     }
-    if (block.id === 'authors_note') return activeChar?.authors_note || '';
-    if (block.id === 'summary') return activeChar?.summary || '';
-    if (block.id === 'user_persona') return persona?.prompt || '';
-    if (block.id === 'char_card') return activeChar?.description || activeChar?.desc || '';
-    if (block.id === 'char_personality' || block.id === 'char_persona') return activeChar?.personality || '';
-    if (block.id === 'scenario') return activeChar?.scenario || '';
-    if (block.id === 'example_dialogue') return activeChar?.mes_example || '';
-    if (block.id === 'first_message') return activeChar?.first_mes || '';
+    if (blockId === 'authors_note') return activeChar?.authors_note || '';
+    if (blockId === 'summary') return activeChar?.summary || '';
+    if (blockId === 'user_persona') return persona?.prompt || '';
+    if (blockId === 'char_card') return activeChar?.description || activeChar?.desc || '';
+    if (blockId === 'char_personality' || blockId === 'char_persona') return activeChar?.personality || '';
+    if (blockId === 'scenario') return activeChar?.scenario || '';
+    if (blockId === 'example_dialogue') return activeChar?.mes_example || '';
+    if (blockId === 'first_message') return activeChar?.first_mes || '';
     return block.content || '';
 };
 
@@ -383,7 +387,20 @@ const activeRegexCount = computed(() => {
 
 const notesTokens = computed(() => estimateTokens(props.activeChar?.authors_note));
 const summaryTokens = computed(() => estimateTokens(props.activeChar?.summary));
-const cardTokens = computed(() => estimateTokens((props.activeChar?.name || '') + '\n' + (props.activeChar?.description || props.activeChar?.desc || '')));
+const cardTokens = computed(() => {
+    const char = props.activeChar;
+    if (!char) return 0;
+
+    const parts = [
+        char.name,
+        char.description || char.desc,
+        char.personality,
+        char.scenario,
+        char.mes_example
+    ].filter(Boolean);
+
+    return estimateTokens(parts.join('\n\n'));
+});
 
 const personaTokens = computed(() => {
     const persona = getEffectivePersona(props.activeChar?.id, props.activeChar?.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null);

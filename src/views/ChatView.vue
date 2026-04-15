@@ -79,6 +79,11 @@ const regexSheet = ref(null);
 const activeChar = ref(null);
 const regexRevision = ref(0);
 const onRegexChanged = () => { regexRevision.value++; };
+const contextBreakdown = ref(null);
+const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
+const HISTORY_HIDE_PERCENT_KEY = 'gz_history_hide_percent';
+const historyFillThreshold = ref(parseInt(localStorage.getItem(HISTORY_FILL_THRESHOLD_KEY) || '85', 10));
+const historyHidePercent = ref(parseInt(localStorage.getItem(HISTORY_HIDE_PERCENT_KEY) || '30', 10));
 let isCalculatingCutoff = false;
 let pendingCutoffRecalc = false;
 let isOpeningChat = false;
@@ -217,6 +222,99 @@ window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 
 // Helper to access translations
 const t = (key) => translations[currentLang.value]?.[key] || key;
+
+const contextSegments = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown || !breakdown.safeContext) return { used: [], reserve: null };
+
+    const total = breakdown.safeContext;
+    const toPercent = (value) => Math.max(0, Math.min(100, (value / total) * 100));
+    const used = [];
+
+    if (breakdown.character > 0) {
+        used.push({ key: 'character', value: breakdown.character, percent: toPercent(breakdown.character), className: 'segment-character' });
+    }
+    if (breakdown.preset > 0) {
+        used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
+    }
+    if (breakdown.authorsNote > 0) {
+        used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
+    }
+    if (breakdown.summary > 0) {
+        used.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
+    }
+    if (breakdown.lorebook > 0) {
+        used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
+    }
+    if (breakdown.history > 0) {
+        used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
+    }
+
+    return {
+        used,
+        reserve: breakdown.lorebookReserve > 0
+            ? { key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' }
+            : null
+    };
+});
+
+const contextBreakdownItems = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown) return [];
+
+    return [
+        { key: 'character', label: 'Character', value: breakdown.character || 0 },
+        { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
+        { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
+        { key: 'summary', label: 'Summary', value: breakdown.summary || 0 },
+        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
+        { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
+        { key: 'history', label: 'History', value: breakdown.history || 0 }
+    ];
+});
+
+const contextLegendItems = computed(() => [
+    { key: 'character', label: 'Character', className: 'segment-character' },
+    { key: 'preset', label: 'Preset', className: 'segment-fixed' },
+    { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
+    { key: 'summary', label: 'Summary', className: 'segment-summary' },
+    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'history', label: 'History', className: 'segment-history' },
+    { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
+]);
+
+const visibleHistoryMessages = computed(() => {
+    return currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
+});
+
+const historyUsagePercent = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown) return 0;
+    const available = breakdown.availableForHistory || 0;
+    if (available <= 0) return breakdown.history > 0 ? 100 : 0;
+    return Math.max(0, Math.min(100, Math.round(((breakdown.history || 0) / available) * 100)));
+});
+
+const historyHidePreview = computed(() => {
+    const messages = visibleHistoryMessages.value;
+    const percent = Math.max(1, Math.min(95, historyHidePercent.value || 30));
+    if (!messages.length) return { count: 0, tokens: 0 };
+
+    const count = Math.max(1, Math.min(messages.length, Math.ceil(messages.length * percent / 100)));
+    const tokens = messages
+        .slice(0, count)
+        .reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
+
+    return { count, tokens };
+});
+
+const shouldRecommendHide = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown || !breakdown.history) return false;
+    const threshold = Math.max(1, Math.min(100, historyFillThreshold.value || 85));
+    return historyUsagePercent.value >= threshold;
+});
+
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {
@@ -393,7 +491,7 @@ async function updateContextCutoff() {
     }
 
     try {
-        const newCutoff = await calculateContext({
+        const result = await calculateContext({
             char: activeChatChar,
             history,
             authorsNote,
@@ -401,7 +499,8 @@ async function updateContextCutoff() {
         });
         
         if (activeChatChar && activeChatChar.id === currentCharId) {
-            cutoffIndex.value = newCutoff;
+            cutoffIndex.value = result?.cutoffIndex ?? 0;
+            contextBreakdown.value = result?.contextBreakdown || null;
         }
     } finally {
         isCalculatingCutoff = false;
@@ -421,6 +520,230 @@ async function updateSessionMessage(char, msgIndex, newMsgData) {
         data.sessions[data.currentId][msgIndex] = newMsgData;
         await db.saveChat(char.id, data);
     }
+}
+
+function clampHistoryFillThreshold(value) {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) return 85;
+    return Math.max(1, Math.min(100, parsed));
+}
+
+function clampHistoryHidePercent(value) {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) return 30;
+    return Math.max(1, Math.min(95, parsed));
+}
+
+function persistHistoryContextSettings(fillThreshold, hidePercent) {
+    historyFillThreshold.value = clampHistoryFillThreshold(fillThreshold);
+    historyHidePercent.value = clampHistoryHidePercent(hidePercent);
+    localStorage.setItem(HISTORY_FILL_THRESHOLD_KEY, String(historyFillThreshold.value));
+    localStorage.setItem(HISTORY_HIDE_PERCENT_KEY, String(historyHidePercent.value));
+}
+
+async function saveCurrentMessages() {
+    if (!activeChatChar) return;
+    const data = await getChatData(activeChatChar.id);
+    if (!data) return;
+    const sessionId = activeChatChar.sessionId || data.currentId;
+    data.sessions[sessionId] = currentMessages.value;
+    await db.saveChat(activeChatChar.id, data);
+}
+
+function openHistoryContextSettings() {
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>History fill threshold (%)</label>
+            <input id="history-fill-threshold" type="number" min="1" max="100" value="${historyFillThreshold.value}">
+        </div>
+        <div class="settings-item">
+            <label>Hide top messages (%)</label>
+            <input id="history-hide-percent" type="number" min="1" max="95" value="${historyHidePercent.value}">
+        </div>
+        <div class="context-sheet-note">Hide top messages recommendation appears when visible history reaches the configured threshold.</div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="history-context-back">Back</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="history-context-save">Save</button>
+        </div>
+    `;
+
+    const fillInput = content.querySelector('#history-fill-threshold');
+    const hideInput = content.querySelector('#history-hide-percent');
+    const saveBtn = content.querySelector('#history-context-save');
+    const backBtn = content.querySelector('#history-context-back');
+
+    backBtn.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openContextSheet(), 250);
+    });
+    saveBtn.addEventListener('click', () => {
+        persistHistoryContextSettings(fillInput?.value, hideInput?.value);
+        closeBottomSheet();
+        setTimeout(() => openContextSheet(), 250);
+    });
+
+    showBottomSheet({
+        title: 'History Context Settings',
+        content,
+        isSolid: true
+    });
+}
+
+async function hideTopMessagesNow() {
+    const count = historyHidePreview.value.count;
+    if (!count || !activeChatChar) return;
+
+    let hidden = 0;
+    for (const msg of currentMessages.value) {
+        if (!msg || msg.isTyping || msg.isHidden) continue;
+        msg.isHidden = true;
+        hidden += 1;
+        if (hidden >= count) break;
+    }
+
+    if (!hidden) return;
+
+    await saveCurrentMessages();
+    await updateContextCutoff();
+    closeBottomSheet();
+    showToast(`Hidden ${hidden} top message${hidden === 1 ? '' : 's'}`);
+}
+
+function confirmHideTopMessages() {
+    const preview = historyHidePreview.value;
+    if (!preview.count) return;
+
+    showBottomSheet({
+        title: 'Hide Top Messages',
+        items: [
+            {
+                label: 'Open Summary',
+                hint: 'Review or generate a summary first',
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>',
+                onClick: () => {
+                    closeBottomSheet();
+                    setTimeout(() => presetView.value?.openSummarySheet(), 250);
+                }
+            },
+            {
+                label: `Hide ${preview.count} message${preview.count === 1 ? '' : 's'} now`,
+                hint: `Free about ${preview.tokens} tokens`,
+                icon: '<svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27z"/></svg>',
+                onClick: () => {
+                    hideTopMessagesNow();
+                }
+            },
+            {
+                label: 'Cancel',
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
+}
+
+async function openContextSheet() {
+    if (!contextBreakdown.value && activeChatChar) {
+        await updateContextCutoff();
+    }
+
+    const breakdown = contextBreakdown.value;
+    if (!breakdown) {
+        showBottomSheet({
+            title: 'Context',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
+                description: 'Context breakdown is not ready yet. Try again in a moment.',
+                buttonText: 'Close',
+                onButtonClick: () => closeBottomSheet()
+            }
+        });
+        return;
+    }
+
+    const used = breakdown.totalUsed || 0;
+    const safeContext = breakdown.safeContext || 0;
+    const remaining = Math.max(0, breakdown.remaining || 0);
+    const preview = historyHidePreview.value;
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+
+    const usedWidth = Math.max(0, 100 - (contextSegments.value.reserve?.percent || 0));
+    const segmentHtml = contextSegments.value.used.map(segment => `
+        <div class="chat-context-segment ${segment.className}" style="width:${segment.percent}%"></div>
+    `).join('');
+
+    const reserveHtml = contextSegments.value.reserve
+        ? `<div class="chat-context-reserve ${contextSegments.value.reserve.className}" style="width:${contextSegments.value.reserve.percent}%"></div>`
+        : '';
+
+    const legendHtml = contextLegendItems.value.map(segment => `
+        <div class="context-legend-item">
+            <span class="context-legend-swatch ${segment.className}"></span>
+            <span>${segment.label}</span>
+        </div>
+    `).join('');
+
+    const breakdownHtml = contextBreakdownItems.value.map(item => `
+        <div class="context-breakdown-row">
+            <span>${item.label}</span>
+            <strong>${item.value}</strong>
+        </div>
+    `).join('');
+
+    const recommendationHtml = shouldRecommendHide.value ? `
+        <div class="context-recommendation">
+            <div class="context-recommendation-title">History is near its limit</div>
+            <div class="context-recommendation-text">Hide about ${preview.count} top message${preview.count === 1 ? '' : 's'} to free about ${preview.tokens} tokens.</div>
+        </div>
+    ` : '';
+
+    const hideButtonLabel = preview.count
+        ? `Hide top ${preview.count}`
+        : 'Hide top messages';
+
+    content.innerHTML = `
+        <div class="context-sheet-summary">
+            <div class="context-sheet-kpi">
+                <strong>${used}</strong>
+                <span>used / ${breakdown.contextSize || safeContext}</span>
+            </div>
+            <div class="context-sheet-kpi">
+                <strong>${remaining}</strong>
+                <span>remaining</span>
+            </div>
+            <div class="context-sheet-kpi">
+                <strong>${historyUsagePercent.value}%</strong>
+                <span>history fill</span>
+            </div>
+        </div>
+        <div class="chat-context-bar context-sheet-bar">
+            <div class="chat-context-used" style="width:${usedWidth}%">${segmentHtml}</div>
+            ${reserveHtml}
+        </div>
+        <div class="context-legend">${legendHtml}</div>
+        <div class="context-breakdown">${breakdownHtml}</div>
+        ${recommendationHtml}
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="context-hide-btn">${hideButtonLabel}</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="context-settings-btn">Settings</button>
+        </div>
+    `;
+
+    content.querySelector('#context-settings-btn')?.addEventListener('click', () => {
+        openHistoryContextSettings();
+    });
+
+    content.querySelector('#context-hide-btn')?.addEventListener('click', () => {
+        confirmHideTopMessages();
+    });
+
+    showBottomSheet({
+        title: 'Context',
+        content,
+        isSolid: true
+    });
 }
 
 async function setupHeader(char = activeChatChar) {
@@ -2854,7 +3177,6 @@ onUnmounted(() => {
 
         <div class="chat-status-gradient"></div>
 
-
         <div class="chat-input-wrapper" ref="chatInputContainer" :style="isAndroid ? { bottom: keyboardOverlap + 'px' } : {}">
             <ChatInput 
                 ref="chatInputRef"
@@ -2874,6 +3196,7 @@ onUnmounted(() => {
                 @search-prev="prevSearchResult"
                 @magic-impersonate="startImpersonation"
                 @magic-notes="presetView.openAuthorsNoteSheet()"
+                @magic-context="openContextSheet()"
                 @magic-stats="openChatStatsSheet()"
                 @magic-summary="presetView.openSummarySheet()"
                 @magic-sessions="openSessionsSheet(activeChatChar)"
@@ -3018,6 +3341,205 @@ onUnmounted(() => {
     flex-direction: column;
     overflow: visible !important;
     flex-shrink: 0;
+}
+
+.chat-context-bar {
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-context-used {
+    display: flex;
+    height: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+
+.chat-context-reserve {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    box-shadow: inset 2px 0 0 rgba(0, 0, 0, 0.35);
+}
+
+.chat-context-segment {
+    height: 100%;
+}
+
+.segment-fixed {
+    background: #8f8f95;
+}
+
+.segment-character {
+    background: #4f8cff;
+}
+
+.segment-history {
+    background: #d8b84a;
+}
+
+.segment-summary {
+    background: #1ec8ff;
+}
+
+.segment-authors-note {
+    background: #7a6cff;
+}
+
+.segment-lorebook {
+    background: #ff8c42;
+}
+
+.segment-lorebook-reserve {
+    background: #43b56f;
+}
+
+.context-sheet {
+    padding: 0 16px 16px;
+}
+
+.context-sheet-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.context-sheet-kpi {
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(var(--element-blur, 20px));
+    text-align: center;
+    color: var(--text-black);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.context-sheet-kpi strong {
+    display: block;
+    font-size: 18px;
+    line-height: 1.2;
+    color: var(--text-black);
+}
+
+.context-sheet-kpi span {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-gray);
+}
+
+.context-sheet-bar {
+    margin-bottom: 14px;
+}
+
+.context-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-bottom: 14px;
+}
+
+.context-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-gray);
+}
+
+.context-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.context-breakdown {
+    display: grid;
+    gap: 8px;
+}
+
+.context-breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.context-breakdown-row span {
+    color: var(--text-gray);
+}
+
+.context-breakdown-row strong {
+    font-weight: 600;
+    color: var(--text-black);
+}
+
+.context-recommendation {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(216, 184, 74, 0.14);
+    border: 1px solid rgba(216, 184, 74, 0.35);
+}
+
+.context-recommendation-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.context-recommendation-text,
+.context-sheet-note {
+    font-size: 13px;
+    color: var(--text-gray);
+    line-height: 1.45;
+}
+
+.context-sheet-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.context-sheet-btn {
+    flex: 1;
+    min-height: 42px;
+    border: none;
+    border-radius: 12px;
+    padding: 0 14px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.context-sheet-btn-primary {
+    color: #fff;
+    background: var(--vk-blue);
+}
+
+.context-sheet-btn-secondary {
+    color: var(--text-black);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 480px) {
+    .context-sheet-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .context-sheet-actions {
+        flex-direction: column;
+    }
 }
 
 
