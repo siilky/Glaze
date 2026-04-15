@@ -134,7 +134,7 @@ Remaining work:
 - **Grouped section updates** (e.g. two sections at a time) — infrastructure ready, not wired in UI.
 - **Summary UI polish** — deferred until the model is battle-tested in real usage.
 
-### 2. Vectorization (in progress — `feat/vectorization`)
+### 2. Vectorization (stable — WORKS, do not touch unless there is a concrete bug)
 
 Goal:
 Introduce vector infrastructure so semantic retrieval can be added cleanly instead of relying only on keyword activation.
@@ -177,10 +177,24 @@ Implementation pieces (done):
 - `src/views/ApiView.vue` — embedding settings section: enable toggle, use-same-as-LLM toggle, endpoint/model/key fields, target selector, scan depth, threshold slider, topK, max chunk tokens, test connection button
 - `src/components/sheets/LorebookSheet.vue` — per-entry `vectorSearch` toggle, "Index Entry" button with status, visible toolbar with "Enable/Disable Vector All" and "Index All" buttons, progress display (X of Y), result summary (indexed/skipped/failed), `vec` + `idx` badges in entries list, injection position restricted to @worldInfoBefore/@worldInfoAfter with macro override hint
 - `src/locales/en/index.json` + `src/locales/ru/index.json` — i18n keys for vector search UI
+- Retrieval metadata is auto-generated during embedding indexing and stored alongside embedding records as `retrievalHints` (derived from `comment`, `keys`, and early `content` lines / `Label: Value` fragments).
+- Embedding invalidation now fingerprints both indexed text and `retrievalHints`, so `Index All` can refresh stale retrieval metadata without requiring content edits.
+- Retrieval now combines `focused` user/current-query search with `fallback` recent-context search instead of choosing only one path.
+- Ranking now applies lightweight `hybridBoost` (`comment`/`keys`) and `descriptorBoost` (early `content` + `retrievalHints`) on top of vector similarity.
+- Indexing now stores per-entry diagnostics for failed embeddings, including user-visible error status (`err`), reason text, and retry-only-failed flow.
+- A reproducible automated QA check now covers the vector-only path end-to-end:
+  - entry indexes successfully;
+  - semantic retrieval matches it;
+  - it appears in `triggeredLorebooks`/`loreEntries`;
+  - it is injected into the final prompt.
+
+Current status:
+- **Vector lorebook retrieval is considered working.**
+- **Do not reopen or refactor vector backend now unless there is a concrete regression or a narrowly scoped bug.**
+- Remaining vector work, if any, should be treated as optional quality tuning rather than foundational backend work.
 
 Known issues / remaining:
-- Embedding settings in ApiView still use English-only fallbacks for some keys; Russian translations needed for ApiView embedding section.
-- **Failed embeddings** — entries where the embedding API returns null/empty are tracked as `failed` but no user-visible error message explains why (could be empty content, API error, etc.).
+- **Vector ranking is still too scene-biased for some character retrieval.** Real test case: after an opening message about `Forum`/`Sina` and a follow-up request describing a blue-haired catgirl, retrieval still ranked `Forum`, `Sina`, `girls dormitory`, `Siri Wing`, `Orel`, `Dara`, etc. above `Asei`, even after reindexing and auto-hints. This confirms the pipeline works technically, but ranking still needs stronger entity/appearance-aware bias and/or weaker fallback influence.
 - Summary simple mode prompts still need proper defaults and editability.
 
 Expected result:
@@ -248,9 +262,8 @@ This order is deliberate:
 ## Next Up
 
 The immediate next milestone is:
-- add Russian i18n for embedding settings in ApiView;
-- investigate and fix entries that consistently fail embedding (the "4 entries re-index every time" issue);
-- test end-to-end: configure embedding API → index lorebook entries → generate with vector results;
+- vectors are in maintenance mode: WORKS, do not touch without a concrete bug report;
+- improve vector ranking only if a real user-facing retrieval miss forces it;
 - summary simple mode prompts — proper defaults and editability.
 
 ## Resume Notes
@@ -259,5 +272,6 @@ When returning to this roadmap after unrelated work:
 - do not reopen rejected tokenizer / reserve ideas unless there is a new explicit decision;
 - vectorization infrastructure is done on `feat/vectorization-v2` (clean branch from `upstream/dev`);
 - entries with `vectorSearch: true` are excluded from keyword matching (both `lorebookState.js` and `generationWorker.js`);
+- vector QA coverage now includes automated end-to-end verification of the vector-only retrieval path;
 - local `dev` branch merges both `feat/cloud-sync` and `feat/vectorization-v2` for integration testing;
 - keep future retrieval work aligned with reusable vector infrastructure, not feature-specific hacks.

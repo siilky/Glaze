@@ -172,13 +172,13 @@ export async function generateChatResponse({
     try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
 
     let result;
+    let safeHistory = history;
     try {
         const safeContextLimit = contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
         const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
         const memoryLimitFactor = isIOS ? 15 : 5;
         const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
 
-        let safeHistory = history;
         if (history && history.length > maxHistoryRetention) {
             safeHistory = history.slice(-maxHistoryRetention);
         }
@@ -223,27 +223,93 @@ export async function generateChatResponse({
         localStorage.setItem(varsKey, JSON.stringify(result.sessionVars));
     }
 
+    let newVectorEntries = [];
     try {
-        const vectorResults = await vectorSearchLorebooks(safeHistory || history, char, char?.sessionId);
+        const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
         if (vectorResults.length > 0 && result.loreEntries) {
             const keywordIds = new Set(result.loreEntries.map(e => e.id));
-            const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+            newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
             result.loreEntries = [...result.loreEntries, ...newVectorEntries];
         }
     } catch (e) {
         console.warn('[generateChatResponse] Vector search failed:', e);
-    }
-
-    if (callbacks.onPromptReady) {
-        callbacks.onPromptReady({
-            loreEntries: result.loreEntries,
-            contextBreakdown: result.contextBreakdown || null
+        showBottomSheet({
+            title: t('title_error') || 'Error',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff9500"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                description: t('msg_vector_generation_failed') || 'The embedding model did not respond during generation, so vector lorebook retrieval could not complete.',
+                buttonText: t('btn_ok') || 'OK',
+                onButtonClick: () => closeBottomSheet()
+            }
         });
+        if (onError) onError(e);
+        return;
     }
-
-    let messages = result.messages;
 
     const safeContext = contextSize - maxTokens;
+    let messages = result.messages;
+
+    if (newVectorEntries.length > 0) {
+        const vectorLoreMessages = newVectorEntries
+            .map(entry => {
+                const content = entry.content || '';
+                const tokens = estimateTokens(content);
+                return {
+                    role: 'system',
+                    content,
+                    blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
+                    isLorebook: true,
+                    sources: tokens > 0 ? [{ source: 'lorebook', tokens }] : [],
+                    _allSources: tokens > 0 ? [{ source: 'lorebook', tokens }] : []
+                };
+            })
+            .filter(msg => msg.content && msg.content.trim().length > 0);
+
+        if (vectorLoreMessages.length > 0) {
+            const firstHistoryIndex = messages.findIndex(m => m.isHistory);
+            if (firstHistoryIndex === -1) {
+                messages = [...messages, ...vectorLoreMessages];
+            } else {
+                messages = [
+                    ...messages.slice(0, firstHistoryIndex),
+                    ...vectorLoreMessages,
+                    ...messages.slice(firstHistoryIndex)
+                ];
+            }
+
+            // Re-apply history trimming after late vector lore injection so we don't blow the effective context.
+            const staticMessages = messages.filter(m => !m.isHistory);
+            const historyMessages = messages.filter(m => m.isHistory);
+            let staticTokens = 0;
+            for (const msg of staticMessages) {
+                staticTokens += estimateTokens(msg.content || '');
+            }
+
+            if (staticTokens >= safeContext) {
+                messages = staticMessages;
+            } else {
+                let remainingHistoryBudget = safeContext - staticTokens;
+                let includedHistoryCount = 0;
+                let currentHistoryTokens = 0;
+
+                for (let i = historyMessages.length - 1; i >= 0; i--) {
+                    const tokens = estimateTokens(historyMessages[i].content || '');
+                    if (currentHistoryTokens + tokens <= remainingHistoryBudget) {
+                        currentHistoryTokens += tokens;
+                        includedHistoryCount++;
+                    } else {
+                        break;
+                    }
+                }
+
+                const keptHistoryMessages = historyMessages.slice(historyMessages.length - includedHistoryCount);
+                messages = [
+                    ...staticMessages,
+                    ...keptHistoryMessages
+                ];
+            }
+        }
+    }
 
     if (result.staticTokens >= safeContext) {
         showBottomSheet({
@@ -258,6 +324,13 @@ export async function generateChatResponse({
         });
         if (onError) onError(new Error("Context limit exceeded"));
         return;
+    }
+
+    if (callbacks.onPromptReady) {
+        callbacks.onPromptReady({
+            loreEntries: result.loreEntries,
+            contextBreakdown: result.contextBreakdown || null
+        });
     }
 
     const requestBody = {

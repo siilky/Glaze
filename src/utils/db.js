@@ -350,13 +350,23 @@ export const db = {
         await db.set(`gz_chat_${charId}`, chatData);
     },
     createSession: async (charId) => {
-        let data = await db.getChat(charId);
-
+        let data = await db.get(`gz_chat_${charId}`);
         if (!data) {
-            data = { currentId: 1, sessions: { 1: [] } };
+            const legacyChats = await db.get('gz_chats');
+            if (legacyChats && legacyChats[charId]) {
+                data = await db.getChat(charId);
+            } else {
+                data = { currentId: 1, sessions: { 1: [] } };
+                await db.saveChat(charId, data);
+                return 1;
+            }
         }
         if (!data.sessions) {
             data.sessions = { 1: [] };
+        }
+        if (!data.currentId) {
+            const ids = Object.keys(data.sessions).map(Number);
+            data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
         }
 
         const ids = Object.keys(data.sessions).map(Number);

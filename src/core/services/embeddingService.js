@@ -104,6 +104,15 @@ export async function getEmbeddings(texts) {
     const headers = { 'Content-Type': 'application/json' };
     if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
 
+    console.info('[embeddingService] requesting embeddings', {
+        count: texts.length,
+        model: config.model,
+        endpoint: config.endpoint,
+        target: config.target,
+        maxChunkTokens: config.maxChunkTokens,
+        sampleLengths: texts.slice(0, 3).map(text => (text || '').length)
+    });
+
     const allChunked = chunkTextsByTokenLimit(texts, config.maxChunkTokens);
     const results = [];
 
@@ -124,6 +133,11 @@ export async function getEmbeddings(texts) {
             results.push(averageVectors(vectors));
         }
     }
+
+    console.info('[embeddingService] embeddings received', {
+        count: results.length,
+        dimensions: results.slice(0, 3).map(v => Array.isArray(v) ? v.length : 0)
+    });
 
     return results;
 }
