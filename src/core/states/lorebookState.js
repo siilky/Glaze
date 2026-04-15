@@ -1,5 +1,8 @@
 import { reactive, watch } from 'vue';
 import { db } from '@/utils/db.js';
+import { getEmbeddings } from '@/core/services/embeddingService.js';
+import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
+import { findTopK } from '@/utils/vectorMath.js';
 
 function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -476,4 +479,150 @@ export function exportSTLorebook(lorebook) {
     });
 
     return { entries };
+}
+
+async function computeTextHash(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function indexLorebookEntry(entry, lorebookId) {
+    if (!isEmbeddingConfigured()) return;
+    if (!entry.id) return;
+
+    const config = getEmbeddingConfig();
+    const text = config.target === 'keys'
+        ? (entry.keys || []).join(', ')
+        : (entry.content || '');
+
+    if (!text.trim()) return;
+
+    const textHash = await computeTextHash(text);
+
+    const existing = await db.getEmbedding(entry.id);
+    if (existing && existing.textHash === textHash) return;
+
+    const vectors = await getEmbeddings([text]);
+    if (!vectors || !vectors[0]) return;
+
+    await db.saveEmbedding({
+        id: entry.id,
+        sourceType: 'lorebook_entry',
+        sourceId: lorebookId,
+        vector: vectors[0],
+        textHash,
+        updatedAt: Date.now()
+    });
+}
+
+export async function indexLorebookEntries(lorebookId) {
+    const lb = lorebookState.lorebooks.find(l => l.id === lorebookId);
+    if (!lb) return;
+
+    const entries = lb.entries.filter(e => e.enabled !== false && e.vectorSearch);
+    if (entries.length === 0) return;
+
+    const config = getEmbeddingConfig();
+    const texts = entries.map(entry => {
+        const text = config.target === 'keys'
+            ? (entry.keys || []).join(', ')
+            : (entry.content || '');
+        return text.trim();
+    });
+
+    const nonEmpty = [];
+    const nonEmptyEntries = [];
+    for (let i = 0; i < texts.length; i++) {
+        if (texts[i]) {
+            nonEmpty.push(texts[i]);
+            nonEmptyEntries.push(entries[i]);
+        }
+    }
+
+    if (nonEmpty.length === 0) return;
+
+    const vectors = await getEmbeddings(nonEmpty);
+    if (!vectors) return;
+
+    for (let i = 0; i < nonEmptyEntries.length; i++) {
+        if (!vectors[i]) continue;
+
+        const textHash = await computeTextHash(nonEmpty[i]);
+        await db.saveEmbedding({
+            id: nonEmptyEntries[i].id,
+            sourceType: 'lorebook_entry',
+            sourceId: lorebookId,
+            vector: vectors[i],
+            textHash,
+            updatedAt: Date.now()
+        });
+    }
+}
+
+export async function getEmbeddingStatus(entryId) {
+    const record = await db.getEmbedding(entryId);
+    if (!record) return 'none';
+    return 'indexed';
+}
+
+export async function vectorSearchLorebooks(history = [], char = null, chatId = null) {
+    const config = getEmbeddingConfig();
+    if (!config.enabled || !isEmbeddingConfigured()) return [];
+
+    const charId = char?.id;
+
+    const activeLorebooks = lorebookState.lorebooks.filter(lb => {
+        if (lb.enabled) return true;
+        if (charId && lorebookState.activations?.character?.[charId]?.includes(lb.id)) return true;
+        if (chatId && lorebookState.activations?.chat?.[chatId]?.includes(lb.id)) return true;
+        return false;
+    });
+
+    if (activeLorebooks.length === 0) return [];
+
+    const vectorEntries = [];
+    activeLorebooks.forEach(lb => {
+        lb.entries.forEach(entry => {
+            if (entry.enabled !== false && entry.vectorSearch) {
+                vectorEntries.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
+            }
+        });
+    });
+
+    if (vectorEntries.length === 0) return [];
+
+    const allEmbeddings = await db.getEmbeddingsBySource('lorebook_entry');
+    const embeddingMap = new Map(allEmbeddings.map(e => [e.id, e]));
+
+    const candidates = [];
+    for (const entry of vectorEntries) {
+        const emb = embeddingMap.get(entry.id);
+        if (emb && emb.vector) {
+            candidates.push({ ...entry, vector: emb.vector });
+        }
+    }
+
+    if (candidates.length === 0) return [];
+
+    const scanDepth = config.scanDepth || 5;
+    const queryText = history.slice(-scanDepth).map(m => m.content).join('\n');
+    if (!queryText.trim()) return [];
+
+    try {
+        const queryVectors = await getEmbeddings([queryText]);
+        if (!queryVectors || !queryVectors[0]) return [];
+
+        const results = findTopK(queryVectors[0], candidates, config.topK || 5, config.threshold || 0.6);
+        return results.map(r => ({
+            ...r,
+            vectorScore: r.score,
+            vector: undefined
+        }));
+    } catch (e) {
+        console.warn('[vectorSearchLorebooks] Error:', e);
+        return [];
+    }
 }

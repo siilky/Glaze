@@ -7,7 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { executeRequest } from '@/core/services/llmApi.js';
 import { sendMessageNotification } from '@/core/services/notificationService.js';
 import { presetState, initPresetState, getEffectivePreset } from '@/core/states/presetState.js';
-import { lorebookState, scanLorebooks, initLorebookState } from '@/core/states/lorebookState.js';
+import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
 import { logger } from '../../utils/logger.js';
@@ -221,6 +221,17 @@ export async function generateChatResponse({
 
     if (result.needsVarsSave) {
         localStorage.setItem(varsKey, JSON.stringify(result.sessionVars));
+    }
+
+    try {
+        const vectorResults = await vectorSearchLorebooks(safeHistory || history, char, char?.sessionId);
+        if (vectorResults.length > 0 && result.loreEntries) {
+            const keywordIds = new Set(result.loreEntries.map(e => e.id));
+            const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+            result.loreEntries = [...result.loreEntries, ...newVectorEntries];
+        }
+    } catch (e) {
+        console.warn('[generateChatResponse] Vector search failed:', e);
     }
 
     if (callbacks.onPromptReady) {

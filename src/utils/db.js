@@ -1,8 +1,9 @@
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
+const STORE_EMBEDDINGS = 'embeddings';
 
 function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
@@ -97,6 +98,10 @@ export const db = {
                             items.forEach(item => newStore.add(item));
                         };
                     }
+                }
+
+                if (!db.objectStoreNames.contains(STORE_EMBEDDINGS)) {
+                    db.createObjectStore(STORE_EMBEDDINGS, { keyPath: 'id' });
                 }
             };
             request.onsuccess = (e) => resolve(e.target.result);
@@ -211,6 +216,50 @@ export const db = {
         if (personas[index]) {
             await db.delete(STORE_PERSONAS, personas[index].id);
         }
+    },
+    // Embedding specific logic
+    getEmbedding: async (id) => {
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readonly');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            const req = store.get(id);
+            req.onsuccess = () => {
+                resolve(req.result);
+                database.close();
+            };
+            req.onerror = () => {
+                reject(req.error);
+                database.close();
+            };
+        });
+    },
+    getAllEmbeddings: async () => {
+        return db.getAll(STORE_EMBEDDINGS);
+    },
+    getEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        return all.filter(e => e.sourceType === sourceType);
+    },
+    saveEmbedding: async (embeddingRecord) => {
+        await db.put(STORE_EMBEDDINGS, embeddingRecord);
+    },
+    deleteEmbedding: async (id) => {
+        await db.delete(STORE_EMBEDDINGS, id);
+    },
+    deleteEmbeddingsBySource: async (sourceType) => {
+        const all = await db.getAll(STORE_EMBEDDINGS);
+        const toDelete = all.filter(e => e.sourceType === sourceType);
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(STORE_EMBEDDINGS, 'readwrite');
+            const store = tx.objectStore(STORE_EMBEDDINGS);
+            for (const item of toDelete) {
+                store.delete(item.id);
+            }
+            tx.oncomplete = () => { database.close(); resolve(); };
+            tx.onerror = () => { database.close(); reject(tx.error); };
+        });
     },
     // Chat specific logic
     getChats: async () => {

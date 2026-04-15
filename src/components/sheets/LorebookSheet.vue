@@ -4,7 +4,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, flushLorebookSave } from '@/core/states/lorebookState.js';
+import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, flushLorebookSave, indexLorebookEntries, indexLorebookEntry, getEmbeddingStatus } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 
@@ -40,7 +40,8 @@ function handleCreateEntry() {
         order: 100,
         caseSensitive: null,
         matchWholeWords: null,
-        useGroupScoring: null
+        useGroupScoring: null,
+        vectorSearch: false
     };
     activeLorebook.value.entries.push(newEntry);
     selectEntry(newEntry, activeLorebook.value.entries.length - 1);
@@ -51,6 +52,7 @@ function selectEntry(entry, index) {
     activeEntry.value = entry;
     activeEntryIndex.value = index;
     currentView.value = 'edit_entry';
+    checkEntryEmbeddingStatus();
 }
 
 function handleDeleteEntry(index) {
@@ -121,6 +123,8 @@ const characterFilterExclude = computed({
 
 const searchQuery = ref('');
 const isGlobalSettingsExpanded = ref(false);
+const indexingEntry = ref(false);
+const entryEmbeddingStatus = ref('none');
 
 const currentContext = ref({ charId: null, chatId: null });
 
@@ -237,6 +241,65 @@ function getReserveModeLabel() {
 // activation now managed via LorebookConnectionsSheet
 
 // --- Lifecycle ---
+
+async function handleIndexEntry() {
+    if (!activeEntry.value || !activeLorebook.value) return;
+    indexingEntry.value = true;
+    try {
+        await indexLorebookEntry(activeEntry.value, activeLorebook.value.id);
+        entryEmbeddingStatus.value = 'indexed';
+    } catch (e) {
+        console.warn('Failed to index entry:', e);
+    } finally {
+        indexingEntry.value = false;
+    }
+}
+
+async function handleIndexAllEntries() {
+    if (!activeLorebook.value) return;
+    indexingEntry.value = true;
+    try {
+        await indexLorebookEntries(activeLorebook.value.id);
+    } catch (e) {
+        console.warn('Failed to index lorebook:', e);
+    } finally {
+        indexingEntry.value = false;
+    }
+}
+
+function openEntriesMenu() {
+    if (!activeLorebook.value) return;
+    const allVector = activeLorebook.value.entries.every(e => e.vectorSearch);
+    showBottomSheet({
+        title: t('section_entries_actions') || 'Entries Actions',
+        items: [
+            {
+                label: allVector ? (t('action_disable_vector_all') || 'Disable Vector Search All') : (t('action_enable_vector_all') || 'Enable Vector Search All'),
+                icon: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+                onClick: () => {
+                    activeLorebook.value.entries.forEach(e => { e.vectorSearch = !allVector; });
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: t('action_index_all') || 'Index All Vector Entries',
+                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+                onClick: async () => {
+                    closeBottomSheet();
+                    await handleIndexAllEntries();
+                }
+            }
+        ]
+    });
+}
+
+async function checkEntryEmbeddingStatus() {
+    if (activeEntry.value?.vectorSearch && activeEntry.value?.id) {
+        entryEmbeddingStatus.value = await getEmbeddingStatus(activeEntry.value.id);
+    } else {
+        entryEmbeddingStatus.value = 'none';
+    }
+}
 
 onMounted(async () => {
     await initLorebookState();
@@ -407,6 +470,7 @@ const sheetActions = computed(() => {
         actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>', onClick: openLorebookMenu });
     } else if (currentView.value === 'entries') {
         actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>', onClick: handleCreateEntry });
+        actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>', onClick: openEntriesMenu });
     }
     return actions;
 });
@@ -743,6 +807,24 @@ defineExpose({ open, openEntry, close, openLorebook });
                         <div class="settings-item">
                             <label>{{ t('label_probability') }} <HelpTip term="lorebook-probability"/></label>
                             <input type="number" v-model="activeEntry.probability" placeholder="100" min="0" max="100">
+                        </div>
+                </div>
+
+                <div class="menu-group">
+                    <div class="section-header">{{ t('section_vector_search') || 'Vector Search' }}</div>
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_vector_search') || 'Enable Vector Search' }}</label>
+                                <div class="settings-desc">{{ t('desc_vector_search_entry') || 'Match this entry by semantic similarity instead of keywords' }}</div>
+                            </div>
+                            <input type="checkbox" v-model="activeEntry.vectorSearch" class="vk-switch">
+                        </div>
+                        <div v-if="activeEntry.vectorSearch" class="settings-item">
+                            <button class="vk-btn-action" style="width:100%;" @click="handleIndexEntry" :disabled="indexingEntry">
+                                {{ indexingEntry ? (t('btn_indexing') || 'Indexing...') : (t('btn_index_entry') || 'Index Entry') }}
+                            </button>
+                            <div v-if="entryEmbeddingStatus === 'indexed'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('entry_indexed') || 'Indexed' }}</div>
+                            <div v-if="entryEmbeddingStatus === 'none'" class="settings-desc" style="margin-top:8px; color: var(--text-gray);">{{ t('entry_not_indexed') || 'Not indexed' }}</div>
                         </div>
                 </div>
 
