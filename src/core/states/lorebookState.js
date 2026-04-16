@@ -1060,6 +1060,24 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
             const queryVector = queryVectorsData[0][0].vector;
             const vectorResults = findTopK(queryVector, candidates, candidates.length, 0);
             
+            // Debug Asei specifically
+            const aseiResult = vectorResults.find(r => r.comment?.includes('Asei'));
+            if (aseiResult) {
+                console.warn('[DEBUG] Asei vector details', {
+                    id: aseiResult.id,
+                    comment: aseiResult.comment,
+                    score: aseiResult.score,
+                    hasVectors: !!aseiResult.vectors,
+                    chunksCount: aseiResult.vectors?.length,
+                    chunkTextSamples: aseiResult.vectors?.slice(0, 3).map(c => ({
+                        textPreview: c.text?.substring(0, 100),
+                        vectorLength: c.vector?.length,
+                        hasVector: !!c.vector
+                    })),
+                    vectorsStructure: aseiResult.vectors ? 'array of chunks' : 'missing'
+                });
+            }
+            
             console.info('[vectorSearchLorebooks] raw similarity scores', {
                 label,
                 totalResults: vectorResults.length,
