@@ -656,7 +656,17 @@ async function vectorSearchMemoryEntries(entries, history = [], currentText = ''
     const candidates = vectorEntries
         .map(entry => {
             const emb = embeddingMap.get(entry.id);
-            return emb?.vector ? { ...entry, vector: emb.vector, retrievalHints: emb.retrievalHints || [] } : null;
+            // NEW: Support both multi-vector (vectors) and legacy (vector)
+            if (emb && (emb.vectors || emb.vector)) {
+                const candidate = { ...entry, retrievalHints: emb.retrievalHints || [] };
+                if (emb.vectors) {
+                    candidate.vectors = emb.vectors;  // Multi-vector
+                } else if (emb.vector) {
+                    candidate.vector = emb.vector;  // Legacy single vector
+                }
+                return candidate;
+            }
+            return null;
         })
         .filter(Boolean);
     if (!candidates.length) return [];
@@ -667,10 +677,12 @@ async function vectorSearchMemoryEntries(entries, history = [], currentText = ''
     const queryText = focusedQueryParts.join('\n').trim();
     if (!queryText) return [];
 
-    const queryVectors = await getEmbeddings([queryText]);
-    if (!queryVectors || !queryVectors[0]) return [];
+    const queryVectorsData = await getEmbeddings([queryText]);
+    if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) return [];
 
-    return findTopK(queryVectors[0], candidates, candidates.length, 0)
+    // Extract the actual vector from the first chunk
+    const queryVector = queryVectorsData[0][0].vector;
+    return findTopK(queryVector, candidates, candidates.length, 0)
         .filter(result => result.score >= (config.threshold || 0.6))
         .slice(0, config.topK || 5)
         .map(result => ({ ...result, vectorScore: result.score, vector: undefined }));
@@ -688,13 +700,14 @@ async function ensureMemoryEntryEmbedding(entry, charId, sessionId) {
     const retrievalHints = extractMemoryRetrievalHints(entry);
     const textHash = JSON.stringify({ text, retrievalHints });
     if (existing && existing.textHash === textHash) return;
-    const vectors = await getEmbeddings([text]);
-    if (!vectors || !vectors[0]) return;
+    const vectorsData = await getEmbeddings([text]);
+    if (!vectorsData || !vectorsData[0]) return;
     await db.saveEmbedding({
         id: entry.id,
         sourceType: 'memory_entry',
         sourceId: `memorybook_${charId}_${sessionId}`,
-        vector: vectors[0],
+        vectors: vectorsData[0],  // NEW: array of {text, vector} chunks
+        vector: null,  // Legacy field set to null
         textHash,
         retrievalHints,
         updatedAt: Date.now()

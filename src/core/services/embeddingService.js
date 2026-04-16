@@ -118,25 +118,24 @@ export async function getEmbeddings(texts) {
 
     for (let i = 0; i < allChunked.length; i++) {
         const chunks = allChunked[i];
-
-        if (chunks.length === 1) {
-            const vectors = await callEmbeddingAPI(url, headers, {
-                model: config.model,
-                input: chunks
-            });
-            results.push(vectors[0]);
-        } else {
-            const vectors = await callEmbeddingAPI(url, headers, {
-                model: config.model,
-                input: chunks
-            });
-            results.push(averageVectors(vectors));
-        }
+        const vectors = await callEmbeddingAPI(url, headers, {
+            model: config.model,
+            input: chunks
+        });
+        
+        // NEW: Return array of {text, vector} instead of averaging
+        results.push(
+            chunks.map((chunkText, idx) => ({
+                text: chunkText,
+                vector: vectors[idx]
+            }))
+        );
     }
 
     console.info('[embeddingService] embeddings received', {
         count: results.length,
-        dimensions: results.slice(0, 3).map(v => Array.isArray(v) ? v.length : 0)
+        totalChunks: results.reduce((sum, chunks) => sum + chunks.length, 0),
+        chunksPerEntry: results.map(chunks => chunks.length)
     });
 
     return results;

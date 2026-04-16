@@ -92,12 +92,13 @@ function extractRetrievalHints(entry) {
     return uniqueStrings(hints, 32);
 }
 
-function buildEmbeddingRecord(entry, lorebookId, vector, textHash) {
+function buildEmbeddingRecord(entry, lorebookId, vectorsData, textHash) {
     return {
         id: entry.id,
         sourceType: 'lorebook_entry',
         sourceId: lorebookId,
-        vector,
+        vectors: vectorsData,  // NEW: array of {text, vector} chunks
+        vector: null,  // Legacy field set to null for new records
         textHash,
         retrievalHints: extractRetrievalHints(entry),
         updatedAt: Date.now()
@@ -109,7 +110,8 @@ function buildEmbeddingErrorRecord(entry, lorebookId, textHash, error) {
         id: entry.id,
         sourceType: 'lorebook_entry',
         sourceId: lorebookId,
-        vector: null,
+        vectors: null,  // NEW: null for error records
+        vector: null,  // Legacy field
         textHash,
         retrievalHints: extractRetrievalHints(entry),
         error,
@@ -765,14 +767,23 @@ export async function indexLorebookEntry(entry, lorebookId) {
     const existing = await db.getEmbedding(entry.id);
     if (existing && existing.textHash === textHash) return;
 
-    const vectors = await getEmbeddings([text]);
-    if (!vectors || !vectors[0]) {
+    const vectorsData = await getEmbeddings([text]);
+    console.log('[indexLorebookEntry] embedding result', {
+        entryId: entry.id,
+        entryName: entry.comment || entry.keys?.[0],
+        textLength: text.length,
+        vectorsData,
+        hasVectorsData: !!vectorsData,
+        firstChunk: vectorsData?.[0]?.[0]
+    });
+    
+    if (!vectorsData || !vectorsData[0] || vectorsData[0].length === 0) {
         const error = getIndexingErrorDetails('empty_embedding', 'Embedding API returned no vector');
         await saveEmbeddingError(entry, lorebookId, textHash, error);
         throw new Error(error.message);
     }
 
-    await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
+    await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectorsData[0], textHash));
 }
 
 export async function indexLorebookEntries(lorebookId, onProgress, options = {}) {
@@ -927,8 +938,15 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     const candidates = [];
     for (const entry of vectorEntries) {
         const emb = embeddingMap.get(entry.id);
-        if (emb && emb.vector) {
-            candidates.push({ ...entry, vector: emb.vector, retrievalHints: emb.retrievalHints || [] });
+        // NEW: Support both multi-vector (vectors) and legacy (vector)
+        if (emb && (emb.vectors || emb.vector)) {
+            const candidate = { ...entry, retrievalHints: emb.retrievalHints || [] };
+            if (emb.vectors) {
+                candidate.vectors = emb.vectors;  // Multi-vector
+            } else if (emb.vector) {
+                candidate.vector = emb.vector;  // Legacy single vector
+            }
+            candidates.push(candidate);
         }
     }
 
@@ -992,13 +1010,15 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
                 label,
                 queryLength: text.length
             });
-            const queryVectors = await getEmbeddings([text]);
-            if (!queryVectors || !queryVectors[0]) {
+            const queryVectorsData = await getEmbeddings([text]);
+            if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) {
                 console.info('[vectorSearchLorebooks] skipped: embedding API returned no query vector', { label });
                 return [];
             }
 
-            const vectorResults = findTopK(queryVectors[0], candidates, candidates.length, 0);
+            // Extract the actual vector from the first chunk
+            const queryVector = queryVectorsData[0][0].vector;
+            const vectorResults = findTopK(queryVector, candidates, candidates.length, 0);
             return vectorResults.map(result => {
                 const hybridBoost = scoreHybridBoost(result, hybridQueryText);
                 const descriptorBoost = scoreDescriptorBoost(result, hybridQueryText);
