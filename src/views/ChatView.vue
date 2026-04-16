@@ -1826,14 +1826,14 @@ async function openMemoryBooksSheet() {
 
     content.innerHTML = `
         ${sessionOverviewCard}
-        <div class="settings-item">
+        ${!vectorEnabled ? `<div class="settings-item">
             <label>Key Match Mode</label>
             <div class="clickable-selector" id="memory-sheet-key-mode-selector">
                 <span>${getMemoryKeyMatchMode(memoryBook) === 'glaze' ? 'Glaze boundaries' : getMemoryKeyMatchMode(memoryBook) === 'both' ? 'Plain + Glaze' : 'Plain contains'}</span>
                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
             </div>
             <div class="context-sheet-note">Keyword retrieval uses only the entry Keys field.</div>
-        </div>
+        </div>` : ''}
         <div class="settings-item-checkbox">
             <div class="settings-text-col">
                 <label>Vector Search</label>

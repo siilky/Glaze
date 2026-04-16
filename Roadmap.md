@@ -580,42 +580,52 @@ Active branch: `fast-fixes`
    - Fix: Add 'novelai' to `normalizeNaisteraModel()`, UI selector, disable references for it
    - Testing: Select NovelAI → no reference images sent (per API behavior)
 
+6. **Fix: LorebookSheet.vue build error (Invalid end tag)**
+   - Status: `done | tested`
+   - Fix: Removed extra `</div>` at line 1001, changed `<template v-if>` to `<div v-if>` for reliability
+   - Testing: `npm run build` passes without Vue template errors
+
+7. **Fix: Memory books Key Match Mode visible during vector search**
+   - Status: `done | not tested`
+   - Fix: Wrap Key Match Mode selector in `${!vectorEnabled ? '...' : ''}` in `openMemoryBooksSheet()`
+   - Testing: Enable vector search in Memory Books → Key Match Mode should be hidden
+
 ### ⏳ PENDING (ordered by complexity)
 
-6. **Fix: lorebook injections shown for user but not assistant messages**
+8. **Fix: lorebook injections shown for user but not assistant messages**
    - Status: `not done | not tested`
    - Complexity: easy
    - Issue: Injection badges only appear on user messages, missing on assistant replies
    - Investigation needed: Check `ChatMessage.vue` lorebook display, `loreEntries` storage per message
    - Fix likely: Remove role-based filter in message rendering
 
-7. **Add i18n keys for new features**
+9. **Add i18n keys for new features**
    - Status: `partially done` (need new keys)
    - Complexity: easy
    - Missing: `desc_vector_search_replaces_keys` already added; check remaining gaps
 
-8. **Fix: streaming quote formatting breaks mid-quote**
-   - Status: `not done | not tested`
-   - Complexity: medium
-   - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
-   - Root cause: `textFormatter.js` regex matches complete quote pairs only
-   - Fix options:
-     - Option A: Stateful quote tracking across delta updates (store open quote state)
-     - Option B: Client-side quote balancer that closes unclosed quotes for display
-     - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
+10. **Fix: streaming quote formatting breaks mid-quote**
+    - Status: `not done | not tested`
+    - Complexity: medium
+    - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
+    - Root cause: `textFormatter.js` regex matches complete quote pairs only
+    - Fix options:
+      - Option A: Stateful quote tracking across delta updates (store open quote state)
+      - Option B: Client-side quote balancer that closes unclosed quotes for display
+      - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
 
-9. **Fix: messages stuck in "generating" state**
-   - Status: `not done | not tested`
-   - Complexity: medium-hard
-   - Issue: Message stays with typing indicator after generation should complete
-   - Symptoms: timer stops, "generating" label persists, no new text arrives
-   - Investigation areas:
-     - Streaming parser error handling in `generateChatResponse`
-     - `isTyping` flag cleanup on error/cancel
-     - `generatingStates` cleanup on app background/foreground
-     - Web stream reader `finally` blocks
+11. **Fix: messages stuck in "generating" state**
+    - Status: `not done | not tested`
+    - Complexity: medium-hard
+    - Issue: Message stays with typing indicator after generation should complete
+    - Symptoms: timer stops, "generating" label persists, no new text arrives
+    - Investigation areas:
+      - Streaming parser error handling in `generateChatResponse`
+      - `isTyping` flag cleanup on error/cancel
+      - `generatingStates` cleanup on app background/foreground
+      - Web stream reader `finally` blocks
 
-10. **Research: SillyTavern vector search implementation**
+12. **Research: SillyTavern vector search implementation**
     - Status: `not done`
     - Complexity: medium (research only)
     - Goal: Compare ST's approach to ours for potential improvements
@@ -626,7 +636,7 @@ Active branch: `fast-fixes`
       - Threshold vs top-k selection?
     - Output: Structured comparison document
 
-11. **Infrastructure: Sync service migration to upstream project**
+13. **Infrastructure: Sync service migration to upstream project**
     - Status: `not done`
     - Complexity: hard
     - Goal: Move cloud sync infrastructure (encryption, delta, queueing) to developer's repo
