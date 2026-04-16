@@ -1,5 +1,5 @@
 import { db, getSyncDeletedEntries, clearSyncDeletedEntry } from '@/utils/db.js';
-import { encryptForSync, decryptFromSync, hasSyncKey } from '@/core/services/crypto/keyManager.js';
+import { encryptForSync, decryptFromSync, hasSyncKey, getSyncKey } from '@/core/services/crypto/keyManager.js';
 
 const CLOUD_BASE = '/Glaze';
 
@@ -14,17 +14,33 @@ const ENTITY_TYPES = {
     MANIFEST: 'manifest'
 };
 
+let _encryptionEnabled = false;
+
+export function isEncryptionEnabled() {
+    return _encryptionEnabled;
+}
+
+export async function detectEncryptionState() {
+    _encryptionEnabled = await hasSyncKey();
+    return _encryptionEnabled;
+}
+
+function ext() {
+    return _encryptionEnabled ? '.enc' : '.json';
+}
+
 function cloudPath(type, id) {
+    const e = ext();
     switch (type) {
-        case ENTITY_TYPES.CHARACTER: return `${CLOUD_BASE}/characters/${id}.enc`;
-        case ENTITY_TYPES.PERSONA: return `${CLOUD_BASE}/personas/${id}.enc`;
-        case ENTITY_TYPES.CHAT: return `${CLOUD_BASE}/chats/${id}.enc`;
-        case ENTITY_TYPES.LOREBOOKS: return `${CLOUD_BASE}/lorebooks.enc`;
-        case ENTITY_TYPES.API_PRESETS: return `${CLOUD_BASE}/api_presets.enc`;
-        case ENTITY_TYPES.THEME_PRESETS: return `${CLOUD_BASE}/theme_presets.enc`;
-        case ENTITY_TYPES.LOCAL_STORAGE: return `${CLOUD_BASE}/local_storage.enc`;
+        case ENTITY_TYPES.CHARACTER: return `${CLOUD_BASE}/characters/${id}${e}`;
+        case ENTITY_TYPES.PERSONA: return `${CLOUD_BASE}/personas/${id}${e}`;
+        case ENTITY_TYPES.CHAT: return `${CLOUD_BASE}/chats/${id}${e}`;
+        case ENTITY_TYPES.LOREBOOKS: return `${CLOUD_BASE}/lorebooks${e}`;
+        case ENTITY_TYPES.API_PRESETS: return `${CLOUD_BASE}/api_presets${e}`;
+        case ENTITY_TYPES.THEME_PRESETS: return `${CLOUD_BASE}/theme_presets${e}`;
+        case ENTITY_TYPES.LOCAL_STORAGE: return `${CLOUD_BASE}/local_storage${e}`;
         case ENTITY_TYPES.MANIFEST: return `${CLOUD_BASE}/manifest.json`;
-        default: return `${CLOUD_BASE}/misc/${id}.enc`;
+        default: return `${CLOUD_BASE}/misc/${id}${e}`;
     }
 }
 
@@ -41,12 +57,13 @@ function getDeviceId() {
 }
 
 async function encryptEntity(data, key) {
-    if (!key) throw new Error('Sync encryption key not available');
+    if (!key) return data;
     return encryptForSync(data, key);
 }
 
 async function decryptEntity(encrypted, key) {
-    if (!key) throw new Error('Sync encryption key not available');
+    if (!key) return encrypted;
+    if (!encrypted.iv || !encrypted.data) return encrypted;
     return decryptFromSync(encrypted, key);
 }
 
@@ -87,8 +104,11 @@ export async function verifyCloudKey(adapter, key) {
     const candidate = await getCloudVerificationCandidate(adapter);
     if (!candidate) return true;
 
-    const encrypted = JSON.parse(candidate.data);
-    await decryptEntity(encrypted, key);
+    const parsed = JSON.parse(candidate.data);
+    if (!_encryptionEnabled) return true;
+    if (!parsed.iv || !parsed.data) return true;
+
+    await decryptEntity(parsed, key);
     return true;
 }
 
@@ -227,10 +247,16 @@ async function buildLocalManifestV2() {
 }
 
 async function readCloudEntityByEntry(adapter, entry, key) {
-    const result = await adapter.download(entry.path);
+    let result = await adapter.download(entry.path);
+    if (!result) {
+        const altPath = entry.path.endsWith('.enc')
+            ? entry.path.replace('.enc', '.json')
+            : entry.path.replace('.json', '.enc');
+        result = await adapter.download(altPath);
+    }
     if (!result) return null;
-    const encrypted = JSON.parse(result.data);
-    return decryptEntity(encrypted, key);
+    const parsed = JSON.parse(result.data);
+    return decryptEntity(parsed, key);
 }
 
 async function applyCloudEntry(adapter, entry, key) {
@@ -443,7 +469,11 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
     await writeLocalManifestV2(clone(cloudManifest));
 
     if (pulled === 0 && conflicts.length === 0 && decryptErrors.length > 0 && Object.keys(cloudEntries).length > 0) {
-        throw new Error('Cloud data was found, but none of it could be decrypted. Restore the correct recovery phrase and try again.');
+        if (_encryptionEnabled) {
+            throw new Error('Cloud data was found, but none of it could be decrypted. Restore the correct recovery phrase and try again.');
+        } else {
+            throw new Error('Cloud data was found, but could not be read. Check sync settings and try again.');
+        }
     }
 
     return { pulled, conflicts, decryptErrors, breakdown };
@@ -454,8 +484,7 @@ export async function pushEntities(adapter, key, onProgress) {
 }
 
 export async function pullEntities(adapter, key, onProgress, onConflict) {
-    const keyAvailable = await hasSyncKey();
-    if (!keyAvailable) throw new Error('Encryption key not available. Set up encryption first.');
+    if (!key && _encryptionEnabled) throw new Error('Encryption key not available. Set up encryption first.');
     return pullManifestV2(adapter, key, onProgress, onConflict);
 }
 

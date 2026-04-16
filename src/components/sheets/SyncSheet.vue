@@ -147,8 +147,7 @@ const afterConnect = async () => {
                 await deleteSyncKey();
                 localSyncStatus.value = 'no_key';
                 restoreSuccess.value = false;
-                setSyncError('Saved recovery phrase does not match the cloud backup for this account. Restore the correct phrase.');
-                startRestore();
+                setSyncError('Saved recovery phrase does not match the cloud backup for this account. Restore the correct phrase or skip encryption.');
                 return;
             }
         }
@@ -159,10 +158,9 @@ const afterConnect = async () => {
     }
 
     if (hasCloudData) {
-        localSyncStatus.value = 'no_key';
-        startRestore();
+        localSyncStatus.value = 'has_cloud_data';
     } else {
-        localSyncStatus.value = 'no_key';
+        localSyncStatus.value = 'ready';
     }
 };
 
@@ -323,11 +321,8 @@ const doWipe = async () => {
         if (!adapter) throw new Error('No provider connected');
         const result = await wipeCloudData(adapter);
         await resetSyncIdentityAfterWipe();
-        const setup = await generateSyncKey();
-        recoveryPhrase.value = setup.recoveryPhrase;
-        showRecoveryPhrase.value = true;
-        localSyncStatus.value = 'connected';
         syncResult.value = { type: 'wipe', ...result };
+        localSyncStatus.value = 'ready';
     } catch (e) {
         console.error('[SyncSheet] Wipe failed:', e);
         setSyncError(e.message);
@@ -344,7 +339,7 @@ const open = async () => {
     syncResult.value = null;
     if (syncProvider.value) {
         const hasKey = await hasSyncKey();
-        localSyncStatus.value = hasKey ? 'connected' : 'no_key';
+        localSyncStatus.value = hasKey ? 'connected' : 'ready';
     } else {
         localSyncStatus.value = '';
     }
@@ -356,10 +351,10 @@ defineExpose({ open, close });
 
 onMounted(async () => {
     const hasKey = await hasSyncKey();
-    if (!hasKey && syncProvider.value) {
-        localSyncStatus.value = 'no_key';
-    } else if (hasKey && syncProvider.value) {
+    if (hasKey && syncProvider.value) {
         localSyncStatus.value = 'connected';
+    } else if (syncProvider.value) {
+        localSyncStatus.value = 'ready';
     }
 });
 </script>
@@ -385,7 +380,7 @@ onMounted(async () => {
                     </button>
 
                     <div class="bs-hint">
-                        {{ t('sync_hint_cloud') || 'Your data will be encrypted before upload. Only you can read it.' }}
+                        {{ t('sync_hint_cloud_optional') || 'Your data can be optionally encrypted before upload. Set up encryption after connecting.' }}
                     </div>
 
                     <div v-if="syncLastError && !syncProvider" class="sync-error-msg">
@@ -455,11 +450,11 @@ onMounted(async () => {
                     </div>
                 </div>
 
-                <!-- Encryption setup needed -->
-                <div v-if="localSyncStatus === 'no_key'" class="bs-section">
+                <!-- Encryption setup (optional) -->
+                <div v-if="localSyncStatus !== 'connected'" class="bs-section">
                     <div class="bs-section-title">{{ t('sync_encryption') || 'Encryption' }}</div>
-                    <div class="bs-hint">{{ t('sync_encryption_setup') || 'Set up encryption to protect your data in the cloud.' }}</div>
-                    <button class="bs-btn bs-primary-btn" @click="setupEncryption">
+                    <div class="bs-hint">{{ t('sync_encryption_optional') || 'Optionally encrypt your data before uploading to the cloud. Without encryption, data is stored as plain JSON.' }}</div>
+                    <button class="bs-btn bs-primary-btn" @click="setupEncryption" :disabled="localSyncStatus === 'has_cloud_data'">
                         <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
                         <span>{{ t('sync_setup_encryption') || 'Set Up Encryption' }}</span>
                     </button>
@@ -467,10 +462,13 @@ onMounted(async () => {
                         <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
                         <span>{{ t('sync_restore_key') || 'Restore from Recovery Phrase' }}</span>
                     </button>
+                    <div v-if="localSyncStatus === 'has_cloud_data'" class="bs-hint" style="color: var(--text-secondary, #ff9500);">
+                        {{ t('sync_encryption_cloud_exists') || 'Cloud data already exists. Restore your recovery phrase to decrypt it, or wipe cloud data first.' }}
+                    </div>
                 </div>
 
-                <!-- Push/Pull buttons -->
-                <div v-if="localSyncStatus === 'connected'" class="bs-section">
+                <!-- Push/Pull buttons (available with or without encryption) -->
+                <div v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'" class="bs-section">
                     <div class="bs-section-title">{{ t('sync_manual') || 'Manual Sync' }}</div>
                     <div class="sync-actions-row">
                         <button class="bs-btn bs-push-btn" @click="doPush" :disabled="isSyncing || syncStatus === SYNC_STATUS.SYNCING">
@@ -485,7 +483,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Auto-sync settings -->
-                <div v-if="localSyncStatus === 'connected'" class="bs-section">
+                <div v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'" class="bs-section">
                     <div class="bs-section-title">{{ t('sync_auto_sync') || 'Auto-Sync' }}</div>
                     <div class="settings-item-checkbox" @click="autoSyncEnabled = !autoSyncEnabled" style="cursor: pointer; padding: 8px 0;">
                         <div class="settings-text-col">
