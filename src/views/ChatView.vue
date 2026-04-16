@@ -8,6 +8,402 @@ let _msgIdCounter = 0;
 function genMsgId() {
     return `msg_${Date.now()}_${++_msgIdCounter}`;
 }
+
+function createEmptyMemoryCoverage() {
+    return {
+        entryIds: [],
+        needsRebuild: false,
+        stale: false
+    };
+}
+
+function createBaseMessageMeta() {
+    return {
+        contextRefs: [],
+        memoryCoverage: createEmptyMemoryCoverage()
+    };
+}
+
+function ensureSessionMemoryBook(chatData, sessionId) {
+    if (!chatData.memoryBooks) chatData.memoryBooks = {};
+    if (!chatData.memoryBooks[sessionId]) {
+        chatData.memoryBooks[sessionId] = {
+            id: `memorybook_${sessionId}`,
+            entries: [],
+            pendingDrafts: [],
+            settings: {
+                enabled: true,
+                maxInjectedEntries: 3,
+                autoCreateInterval: 12,
+                useDelayedAutomation: true,
+                injectionTarget: 'summary_block',
+                batchSize: 1,
+                parallelJobs: 1,
+                generationSource: 'current',
+                generationModel: '',
+                generationUseCurrentModelOverride: false,
+                generationEndpoint: '',
+                generationApiKey: '',
+                generationTemperature: null,
+                promptPreset: 'strict_factual',
+                customPrompts: []
+            },
+            updatedAt: 0
+        };
+    }
+    if (!memoryBooksHasAutomationState(chatData.memoryBooks[sessionId])) {
+        chatData.memoryBooks[sessionId].automation = createMemoryAutomationState();
+    }
+    return chatData.memoryBooks[sessionId];
+}
+
+function createMemoryAutomationState() {
+    return {
+        lastProcessedMessageCount: 0,
+        pendingTrigger: null,
+        isGeneratingDraft: false
+    };
+}
+
+function memoryBooksHasAutomationState(memoryBook) {
+    return !!(memoryBook && typeof memoryBook.automation === 'object');
+}
+
+function ensureMemoryAutomationState(memoryBook) {
+    if (!memoryBooksHasAutomationState(memoryBook)) {
+        memoryBook.automation = createMemoryAutomationState();
+    }
+    if (!Number.isFinite(Number(memoryBook.automation.lastProcessedMessageCount)) || Number(memoryBook.automation.lastProcessedMessageCount) < 0) {
+        memoryBook.automation.lastProcessedMessageCount = 0;
+    }
+    if (typeof memoryBook.automation.isGeneratingDraft !== 'boolean') {
+        memoryBook.automation.isGeneratingDraft = false;
+    }
+    if (memoryBook.automation.pendingTrigger && typeof memoryBook.automation.pendingTrigger !== 'object') {
+        memoryBook.automation.pendingTrigger = null;
+    }
+    return memoryBook.automation;
+}
+
+function getStableVisibleMessages(messages) {
+    return (Array.isArray(messages) ? messages : []).filter(msg => msg && !msg.isTyping && !msg.isHidden && !msg.isError);
+}
+
+function countStableConversationMessages(messages) {
+    return getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char').length;
+}
+
+function getLastStableConversationRole(messages) {
+    const visible = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    return visible.length ? visible[visible.length - 1].role : null;
+}
+
+function computeDelayedWaitExchanges(triggerRole) {
+    return triggerRole === 'user' ? 2 : 1;
+}
+
+function countCompletedExchangesSince(startCount, currentCount) {
+    return Math.max(0, Math.floor(Math.max(0, currentCount - startCount) / 2));
+}
+
+function normalizeAutoCreateInterval(memoryBook) {
+    const raw = Number(memoryBook?.settings?.autoCreateInterval || 12);
+    return Math.max(1, Math.min(200, Number.isFinite(raw) ? Math.round(raw) : 12));
+}
+
+function resolvePendingTriggerMessages(stableMessages, pendingTrigger) {
+    if (!pendingTrigger || !Array.isArray(stableMessages) || !stableMessages.length) return [];
+
+    const storedIds = Array.isArray(pendingTrigger.messageIds)
+        ? pendingTrigger.messageIds.filter(Boolean)
+        : [];
+    if (storedIds.length) {
+        const idSet = new Set(storedIds);
+        const matched = stableMessages.filter(msg => idSet.has(msg.id));
+        if (matched.length === storedIds.length) {
+            return storedIds
+                .map(id => matched.find(msg => msg.id === id))
+                .filter(Boolean);
+        }
+    }
+
+    const startIndex = Math.max(0, Number(pendingTrigger.windowStartIndex) || 0);
+    const endIndex = Math.max(startIndex, Number(pendingTrigger.windowEndIndex) || startIndex);
+    return stableMessages.slice(startIndex, endIndex + 1);
+}
+
+function buildBootstrapSegments(messages, interval) {
+    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    const normalizedInterval = Math.max(1, interval);
+    const segments = [];
+    let cursor = 0;
+
+    while (cursor + normalizedInterval <= stableMessages.length) {
+        let endExclusive = cursor + normalizedInterval;
+        const baseLastRole = stableMessages[endExclusive - 1]?.role || null;
+
+        // Prefer ending on assistant/character turns when a short extension can avoid
+        // cutting a conversational exchange in an awkward place.
+        if (baseLastRole === 'user') {
+            const extensionLimit = Math.min(stableMessages.length, endExclusive + 2);
+            while (endExclusive < extensionLimit && stableMessages[endExclusive]?.role !== 'char') {
+                endExclusive += 1;
+            }
+            if (endExclusive < extensionLimit && stableMessages[endExclusive]?.role === 'char') {
+                endExclusive += 1;
+            }
+        }
+
+        const segment = stableMessages.slice(cursor, endExclusive);
+        if (segment.length) segments.push(segment);
+        cursor = endExclusive;
+    }
+
+    return segments;
+}
+
+function arraysEqual(a = [], b = []) {
+    return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+function calculateMessageOverlapRatio(leftIds = [], rightIds = []) {
+    if (!leftIds.length || !rightIds.length) return 0;
+    const rightSet = new Set(rightIds);
+    const intersection = leftIds.filter(id => rightSet.has(id)).length;
+    return intersection / Math.max(leftIds.length, rightIds.length);
+}
+
+function findConflictingMemoryEntry(memoryBook, selectedIds, { includeDrafts = true, includeEntries = true, overlapThreshold = 0.8 } = {}) {
+    const normalizedSelectedIds = Array.isArray(selectedIds) ? selectedIds.filter(Boolean) : [];
+    if (!normalizedSelectedIds.length) return null;
+
+    const pools = [];
+    if (includeEntries) pools.push(...(Array.isArray(memoryBook?.entries) ? memoryBook.entries.map(entry => ({ kind: 'entry', item: entry })) : []));
+    if (includeDrafts) pools.push(...(Array.isArray(memoryBook?.pendingDrafts) ? memoryBook.pendingDrafts.map(entry => ({ kind: 'draft', item: entry })) : []));
+
+    for (const candidate of pools) {
+        const entryIds = normalizeEntryMessageIds(candidate.item);
+        if (!entryIds.length) continue;
+        if (arraysEqual(entryIds, normalizedSelectedIds)) {
+            return { ...candidate, reason: 'exact' };
+        }
+        if (calculateMessageOverlapRatio(entryIds, normalizedSelectedIds) >= overlapThreshold) {
+            return { ...candidate, reason: 'overlap' };
+        }
+    }
+    return null;
+}
+
+function normalizeEntryMessageIds(entry) {
+    if (!entry || typeof entry !== 'object') return [];
+    if (Array.isArray(entry.messageIds)) return [...new Set(entry.messageIds.filter(Boolean))];
+
+    const ids = [];
+    if (entry.messageRange?.startMessageId) ids.push(entry.messageRange.startMessageId);
+    if (entry.messageRange?.endMessageId && entry.messageRange.endMessageId !== entry.messageRange.startMessageId) {
+        ids.push(entry.messageRange.endMessageId);
+    }
+    return [...new Set(ids.filter(Boolean))];
+}
+
+function reconcileMemoryBookForMessages(memoryBook, messages) {
+    if (!memoryBook || typeof memoryBook !== 'object') return;
+    const survivingIds = new Set(messages.map(msg => msg?.id).filter(Boolean));
+
+    for (const msg of messages) {
+        if (!msg.memoryCoverage || typeof msg.memoryCoverage !== 'object') msg.memoryCoverage = createEmptyMemoryCoverage();
+        msg.memoryCoverage.entryIds = [];
+        msg.memoryCoverage.needsRebuild = false;
+        msg.memoryCoverage.stale = false;
+    }
+
+    const nextEntries = [];
+    for (const entry of Array.isArray(memoryBook.entries) ? memoryBook.entries : []) {
+        const entryMessageIds = normalizeEntryMessageIds(entry);
+        if (!entryMessageIds.length) continue;
+
+        const survivingEntryIds = entryMessageIds.filter(id => survivingIds.has(id));
+        if (!survivingEntryIds.length) {
+            continue;
+        }
+
+        const isPartial = survivingEntryIds.length !== entryMessageIds.length;
+        entry.messageIds = survivingEntryIds;
+        entry.messageRange = {
+            startMessageId: survivingEntryIds[0],
+            endMessageId: survivingEntryIds[survivingEntryIds.length - 1]
+        };
+        entry.status = isPartial ? 'needs_rebuild' : (entry.status || 'active');
+        entry.updatedAt = Date.now();
+        nextEntries.push(entry);
+
+        for (const msg of messages) {
+            if (!survivingEntryIds.includes(msg.id)) continue;
+            if (!msg.memoryCoverage.entryIds.includes(entry.id)) {
+                msg.memoryCoverage.entryIds.push(entry.id);
+            }
+            if (entry.status === 'needs_rebuild') {
+                msg.memoryCoverage.needsRebuild = true;
+            }
+        }
+    }
+
+    memoryBook.entries = nextEntries;
+    memoryBook.updatedAt = Date.now();
+}
+
+function reconcileSessionMemoryState(chatData, sessionId, messages) {
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    reconcileMemoryBookForMessages(memoryBook, messages);
+}
+
+async function runMemoryMaintenancePass(chatData, sessionId, { reindex = false } = {}) {
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const messages = Array.isArray(chatData?.sessions?.[sessionId]) ? chatData.sessions[sessionId] : [];
+    const survivingIds = new Set(messages.map(msg => msg?.id).filter(Boolean));
+    const existingEntryIds = new Set((Array.isArray(memoryBook.entries) ? memoryBook.entries : []).map(entry => entry?.id).filter(Boolean));
+
+    let staleMessages = 0;
+    let clearedDrafts = 0;
+    let removedEntries = 0;
+    let rebuildEntries = 0;
+
+    for (const msg of messages) {
+        if (!msg.memoryCoverage || typeof msg.memoryCoverage !== 'object') {
+            msg.memoryCoverage = createEmptyMemoryCoverage();
+        }
+        const before = Array.isArray(msg.memoryCoverage.entryIds) ? msg.memoryCoverage.entryIds : [];
+        const missingRefs = before.filter(id => !existingEntryIds.has(id));
+        if (missingRefs.length) {
+            msg.memoryCoverage.stale = true;
+            staleMessages += 1;
+        }
+    }
+
+    const approvedEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+    const nextApprovedEntries = [];
+    for (const entry of approvedEntries) {
+        const ids = normalizeEntryMessageIds(entry);
+        const survivingEntryIds = ids.filter(id => survivingIds.has(id));
+        if (!survivingEntryIds.length) {
+            removedEntries += 1;
+            await deleteMemoryEntryIndexIfPresent(entry.id);
+            continue;
+        }
+        if (survivingEntryIds.length !== ids.length) {
+            rebuildEntries += 1;
+        }
+        nextApprovedEntries.push(entry);
+    }
+    memoryBook.entries = nextApprovedEntries;
+
+    const nextPendingDrafts = [];
+    for (const draft of Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : []) {
+        const ids = normalizeEntryMessageIds(draft);
+        const survivingDraftIds = ids.filter(id => survivingIds.has(id));
+        if (!survivingDraftIds.length) {
+            clearedDrafts += 1;
+            continue;
+        }
+        draft.messageIds = survivingDraftIds;
+        draft.messageRange = {
+            startMessageId: survivingDraftIds[0],
+            endMessageId: survivingDraftIds[survivingDraftIds.length - 1]
+        };
+        draft.updatedAt = Date.now();
+        nextPendingDrafts.push(draft);
+    }
+    memoryBook.pendingDrafts = nextPendingDrafts;
+
+    reconcileSessionMemoryState(chatData, sessionId, messages);
+
+    if (reindex) {
+        await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+    }
+
+    const automation = ensureMemoryAutomationState(memoryBook);
+    automation.pendingTrigger = null;
+    automation.lastProcessedMessageCount = countStableConversationMessages(messages);
+    memoryBook.updatedAt = Date.now();
+    chatData.sessions[sessionId] = messages;
+    await db.saveChat(activeChatChar.id, chatData);
+
+    return {
+        staleMessages,
+        clearedDrafts,
+        removedEntries,
+        rebuildEntries,
+        reindexed: !!reindex
+    };
+}
+
+function formatElapsedSeconds(ms) {
+    return `${Math.max(0, ms || 0) / 1000}`.replace(/(\.\d).*/, '$1') + 's';
+}
+
+function stopMemoryDraftProgress() {
+    if (memoryDraftTimer) {
+        clearInterval(memoryDraftTimer);
+        memoryDraftTimer = null;
+    }
+    memoryDraftState.value = {
+        active: false,
+        startedAt: 0,
+        elapsedMs: 0,
+        label: ''
+    };
+}
+
+function startMemoryDraftProgress(label = 'Generating memory draft') {
+    if (memoryDraftTimer) clearInterval(memoryDraftTimer);
+    const startedAt = Date.now();
+    memoryDraftState.value = {
+        active: true,
+        startedAt,
+        elapsedMs: 0,
+        label
+    };
+    memoryDraftTimer = setInterval(() => {
+        memoryDraftState.value = {
+            ...memoryDraftState.value,
+            active: true,
+            elapsedMs: Date.now() - startedAt
+        };
+    }, 100);
+}
+
+function genMemoryEntryId() {
+    return `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function genMemoryPromptId() {
+    return `memprompt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function normalizeMemoryEntryShape(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    if (!Array.isArray(entry.keys)) entry.keys = [];
+    if (!Array.isArray(entry.glazeKeys)) entry.glazeKeys = [];
+    if (typeof entry.vectorSearch !== 'boolean') entry.vectorSearch = false;
+    return entry;
+}
+
+function parseMemoryKeyInput(value) {
+    return [...new Set(String(value || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean))].slice(0, 24);
+}
+
+function buildMemoryKeysFromText(text, fallback = []) {
+    const normalizedFallback = Array.isArray(fallback)
+        ? fallback.map(item => String(item || '').trim()).filter(Boolean)
+        : [];
+    const words = String(text || '')
+        .match(/[\p{L}\p{N}_-]{4,}/gu) || [];
+    const uniqueWords = [...new Set(words.map(word => word.trim()))];
+    return [...new Set([...normalizedFallback, ...uniqueWords])].slice(0, 12);
+}
 </script>
 
 <script setup>
@@ -21,9 +417,10 @@ import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/p
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
-import { generateChatResponse, calculateContext } from '@/core/services/generationService.js';
+import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { getApiConfig } from '@/core/config/APISettings.js';
+import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import { db } from '@/utils/db.js';
@@ -51,6 +448,147 @@ import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, ma
 import { showToast } from '@/core/states/toastState.js';
 import { incrementMessageCounter, shouldAutoSync, resetMessageCounter } from '@/core/states/syncState.js';
 import { fullSync } from '@/core/services/syncService.js';
+
+async function indexMemoryEntryIfNeeded(entry, charId, sessionId) {
+    if (!entry?.vectorSearch) return;
+    const generationService = await import('@/core/services/generationService.js');
+    if (typeof generationService.indexMemoryEntryForSession === 'function') {
+        await generationService.indexMemoryEntryForSession(entry, charId, sessionId);
+    }
+}
+
+async function deleteMemoryEntryIndexIfPresent(entryId) {
+    if (!entryId) return;
+    const generationService = await import('@/core/services/generationService.js');
+    if (typeof generationService.deleteMemoryEntryIndex === 'function') {
+        await generationService.deleteMemoryEntryIndex(entryId);
+    }
+}
+
+async function reindexMemoryEntry(entry, charId, sessionId) {
+    if (!entry?.id || !entry?.vectorSearch) return;
+    await deleteMemoryEntryIndexIfPresent(entry.id);
+    await indexMemoryEntryIfNeeded(entry, charId, sessionId);
+}
+
+function shouldEnableMemoryVectorSearch() {
+    const config = getEmbeddingConfig();
+    return !!(config?.enabled && isEmbeddingConfigured());
+}
+
+function getMemoryVectorSearchEnabled(memoryBook) {
+    if (!memoryBook || typeof memoryBook !== 'object') return false;
+    if (!memoryBook.settings || typeof memoryBook.settings !== 'object') memoryBook.settings = {};
+    if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') {
+        const hasExistingVectorEntries = [
+            ...(Array.isArray(memoryBook.entries) ? memoryBook.entries : []),
+            ...(Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
+        ].some(entry => entry?.vectorSearch);
+        memoryBook.settings.vectorSearchEnabled = hasExistingVectorEntries || shouldEnableMemoryVectorSearch();
+    }
+    return !!memoryBook.settings.vectorSearchEnabled && shouldEnableMemoryVectorSearch();
+}
+
+function getMemoryKeyMatchMode(memoryBook) {
+    if (!memoryBook || typeof memoryBook !== 'object') return 'plain';
+    if (!memoryBook.settings || typeof memoryBook.settings !== 'object') memoryBook.settings = {};
+    if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) {
+        memoryBook.settings.keyMatchMode = 'plain';
+    }
+    return memoryBook.settings.keyMatchMode;
+}
+
+function setMemoryVectorSearchOnEntries(memoryBook, enabled) {
+    const nextValue = !!enabled;
+    (Array.isArray(memoryBook?.entries) ? memoryBook.entries : []).forEach(entry => {
+        entry.vectorSearch = nextValue;
+    });
+    (Array.isArray(memoryBook?.pendingDrafts) ? memoryBook.pendingDrafts : []).forEach(entry => {
+        entry.vectorSearch = nextValue;
+    });
+}
+
+async function reindexAllMemoryEntries(memoryBook, charId, sessionId) {
+    const entries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+        .filter(entry => entry?.id && entry?.content && entry.vectorSearch);
+    for (const entry of entries) {
+        await reindexMemoryEntry(entry, charId, sessionId);
+    }
+}
+
+async function openMemoryEntryEditor(entryId) {
+    if (!activeChatChar || !entryId) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const entry = memoryBook.entries.find(item => item.id === entryId);
+    if (!entry) return;
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Title</label>
+            <input id="memory-entry-title" type="text" value="${(entry.title || '').replace(/"/g, '&quot;')}" placeholder="Memory title">
+        </div>
+        <div class="settings-item">
+            <label>Content</label>
+            <textarea id="memory-entry-content" rows="8" placeholder="Memory text">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+        </div>
+        <div class="settings-item">
+            <label>Keys</label>
+            <input id="memory-entry-keys" type="text" value="${(Array.isArray(entry.keys) ? entry.keys.join(', ') : '').replace(/"/g, '&quot;')}" placeholder="key one, key two">
+            <div class="context-sheet-note">Only this field is used for keyword retrieval.</div>
+        </div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-entry-cancel">Cancel</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-entry-save">Save</button>
+        </div>
+    `;
+
+    content.querySelector('#memory-entry-cancel')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+    });
+
+    content.querySelector('#memory-entry-save')?.addEventListener('click', async () => {
+        const nextTitle = content.querySelector('#memory-entry-title')?.value?.trim() || 'Untitled memory';
+        const nextContent = content.querySelector('#memory-entry-content')?.value?.trim() || '';
+        const nextKeys = parseMemoryKeyInput(content.querySelector('#memory-entry-keys')?.value);
+
+        if (!nextContent) {
+            showToast('Memory content is required');
+            return;
+        }
+
+        const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
+            || String(entry.content || '') !== nextContent;
+
+        entry.title = nextTitle;
+        entry.content = nextContent;
+        entry.keys = nextKeys;
+        entry.updatedAt = Date.now();
+        normalizeMemoryEntryShape(entry);
+        memoryBook.updatedAt = Date.now();
+        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+        chatData.sessions[sessionId] = currentMessages.value;
+
+        try {
+            if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
+                await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
+            }
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        } catch (error) {
+            console.error('Failed to save memory entry:', error);
+            showToast(`Memory save failed: ${formatError(error)}`);
+        }
+    });
+
+    showBottomSheet({ title: 'Edit Memory Entry', content, isSolid: true });
+}
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -80,6 +618,13 @@ const lorebookSheet = ref(null);
 const regexSheet = ref(null);
 const activeChar = ref(null);
 const regexRevision = ref(0);
+const memoryDraftState = ref({
+    active: false,
+    startedAt: 0,
+    elapsedMs: 0,
+    label: ''
+});
+let memoryDraftTimer = null;
 const onRegexChanged = () => { regexRevision.value++; };
 const contextBreakdown = ref(null);
 const HISTORY_FILL_THRESHOLD_KEY = 'gz_history_fill_threshold';
@@ -105,6 +650,74 @@ const currentSearchIndex = ref(-1);
 const selectedMessages = ref(new Set());
 const isSelectionMode = computed(() => selectedMessages.value.size > 0);
 
+const builtInMemoryPrompts = [
+    {
+        key: 'strict_factual',
+        label: 'Strict factual',
+        prompt: [
+            'Create exactly one concise long-term memory entry from the following roleplay segment.',
+            'Preserve the original language of the source segment. Do not translate it.',
+            'Use only facts that are explicitly supported by the segment.',
+            'Do not infer completed outcomes, approvals, registrations, or decisions unless clearly stated.',
+            'Keep concrete names exactly as used in the segment.',
+            'Return plain text in this exact format:',
+            'Memory: <one concise memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if vector retrieval should dominate>',
+            '',
+            '{{history}}'
+        ].join('\n')
+    },
+    {
+        key: 'durable_events',
+        label: 'Durable events',
+        prompt: [
+            'Extract one durable memory from the following roleplay segment.',
+            'Keep the source language exactly as written.',
+            'Focus on lasting developments, obligations, status changes, accepted items, revealed facts, or relationship changes.',
+            'Do not speculate beyond the text.',
+            'Return plain text in this exact format:',
+            'Memory: <one compact memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            '',
+            '{{history}}'
+        ].join('\n')
+    },
+    {
+        key: 'relationship_focus',
+        label: 'Relationship focus',
+        prompt: [
+            'Create one memory entry focused on relationship-relevant developments from the following roleplay segment.',
+            'Preserve the original language and exact names from the segment.',
+            'Only include information directly supported by the text.',
+            'If no durable relationship-relevant development exists, summarize the most durable factual development instead.',
+            'Return plain text in this exact format:',
+            'Memory: <one concise memory entry>',
+            'Keys: <comma-separated retrieval keys, or empty if not needed>',
+            '',
+            '{{history}}'
+        ].join('\n')
+    }
+];
+
+function getMemoryPromptOptions(settings = {}) {
+    const custom = Array.isArray(settings.customPrompts) ? settings.customPrompts : [];
+    return [
+        ...builtInMemoryPrompts,
+        ...custom.map(item => ({ key: item.id, label: item.name || 'Custom prompt', prompt: item.prompt || '' }))
+    ];
+}
+
+function resolveMemoryPrompt(settings = {}) {
+    const options = getMemoryPromptOptions(settings);
+    const selected = options.find(item => item.key === settings.promptPreset);
+    return selected?.prompt || builtInMemoryPrompts[0].prompt;
+}
+
+function getMemoryPromptLabel(settings = {}) {
+    const options = getMemoryPromptOptions(settings);
+    return options.find(item => item.key === settings.promptPreset)?.label || builtInMemoryPrompts[0].label;
+}
+
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
     if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
@@ -122,14 +735,1343 @@ function toggleSelection(msgId) {
 }
 
 function clearSelection() {
-    selectedMessages.value.clear();
+    selectedMessages.value = new Set();
+}
+
+function buildMemoryContinuityContext(memoryBook, selected) {
+    const selectedIds = new Set(selected.map(msg => msg.id));
+    const activeEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+    return activeEntries
+        .filter(entry => {
+            const ids = Array.isArray(entry.messageIds) ? entry.messageIds : [];
+            return ids.length && ids.every(id => !selectedIds.has(id));
+        })
+        .slice(-2)
+        .map(entry => `${entry.title || 'Memory'}: ${entry.content || ''}`.trim())
+        .filter(Boolean)
+        .join('\n\n');
+}
+
+function buildMemoryDraftLoreContext(selected) {
+    const selectedLabels = new Map();
+    selected.forEach(msg => {
+        (Array.isArray(msg?.contextRefs) ? msg.contextRefs : []).forEach(ref => {
+            if (ref?.type === 'lorebook' && ref?.id) {
+                const key = ref.id;
+                const existing = selectedLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
+                existing.count += 1;
+                selectedLabels.set(key, existing);
+            }
+        });
+    });
+
+    return [...selectedLabels.values()]
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+        .map(item => `${item.label}${item.count > 1 ? ` x${item.count}` : ''}`)
+        .join('\n');
+}
+
+function buildMemoryDraftSummaryExcerpt(summary) {
+    if (!summary) return '';
+    if (typeof summary === 'string') return summary.trim().slice(0, 800);
+    if (typeof summary === 'object') {
+        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
+        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
+            .map(key => summary[key])
+            .filter(value => typeof value === 'string' && value.trim())
+            .join('\n\n')
+            .slice(0, 800);
+    }
+    return '';
+}
+
+function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
+    const text = String(rawText || '').trim();
+    const lines = text.split(/\r?\n/);
+    let memory = '';
+    let keysLine = '';
+
+    for (const line of lines) {
+        if (!memory && /^memory\s*:/i.test(line)) {
+            memory = line.replace(/^memory\s*:/i, '').trim();
+            continue;
+        }
+        if (!keysLine && /^keys\s*:/i.test(line)) {
+            keysLine = line.replace(/^keys\s*:/i, '').trim();
+        }
+    }
+
+    if (!memory) {
+        const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
+        memory = nonMeta.replace(/^memory\s*:/i, '').trim();
+    }
+
+    const parsedKeys = keysLine
+        ? keysLine.split(',').map(item => item.trim()).filter(Boolean)
+        : [];
+
+    return {
+        content: memory || text,
+        keys: parsedKeys.length ? parsedKeys : buildMemoryKeysFromText(memory || text, fallbackKeys)
+    };
+}
+
+function openMemoryPromptPreview(item, options = {}) {
+    if (!item) return;
+    const { onClose } = options;
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Rule</label>
+            <div class="context-sheet-note">${(item.label || 'Prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>
+        <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">Close</button>
+        </div>
+    `;
+    content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
+        closeBottomSheet();
+        if (typeof onClose === 'function') {
+            setTimeout(() => onClose(), 50);
+        }
+    });
+    showBottomSheet({ title: 'Generation Rule', content, isSolid: true });
+}
+
+async function createMemoryFromSelection() {
+    if (!activeChatChar || selectedMessages.value.size === 0) return;
+
+    const selected = currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id));
+    if (!selected.length) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
+    const selectedIds = selected.map(msg => msg.id);
+    const firstMessage = selected[0];
+    const lastMessage = selected[selected.length - 1];
+    const previewLines = selected
+        .map(msg => `${msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+    const content = previewLines.join('\n').slice(0, 2000);
+    const personaNames = selected
+        .map(msg => msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character'))
+        .filter(Boolean);
+
+    const createdEntry = normalizeMemoryEntryShape({
+        id: genMemoryEntryId(),
+        title: `Memory ${memoryBook.entries.length + 1}`,
+        content,
+        keys: buildMemoryKeysFromText(content, personaNames),
+        glazeKeys: [],
+        vectorSearch: vectorEnabled,
+        messageIds: selectedIds,
+        messageRange: {
+            startMessageId: firstMessage.id,
+            endMessageId: lastMessage.id
+        },
+        status: 'active',
+        source: 'manual',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+    });
+    memoryBook.entries.push(createdEntry);
+
+    memoryBook.updatedAt = Date.now();
+    reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+    chatData.sessions[sessionId] = currentMessages.value;
+    await db.saveChat(activeChatChar.id, chatData);
+    await indexMemoryEntryIfNeeded(createdEntry, activeChatChar.id, sessionId);
+    clearSelection();
+}
+
+async function generateMemoryDraftFromSelection() {
+    if (!activeChatChar || selectedMessages.value.size === 0) return;
+
+    const selected = currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id));
+    if (!selected.length) return;
+    clearSelection();
+    await generateMemoryDraftForMessages(selected, { openSheet: true, source: 'manual_draft' });
+}
+
+async function generateMemoryDraftForMessages(selectedMessages, { openSheet = false, source = 'auto_delayed' } = {}) {
+    if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
+
+    const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isHidden && !msg.isError);
+    if (!selected.length) return false;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    if (automation.isGeneratingDraft) return false;
+
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
+    const summary = chatData?.summaries?.[sessionId] || null;
+    const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
+    const history = selected
+        .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
+        .filter(Boolean)
+        .join('\n');
+
+    const settings = memoryBook.settings || {};
+    const continuity = buildMemoryContinuityContext(memoryBook, selected);
+    const loreContext = buildMemoryDraftLoreContext(selected);
+    const summaryExcerpt = buildMemoryDraftSummaryExcerpt(summary);
+    const apiConfigOverride = settings.generationSource === 'custom'
+        ? {
+            apiUrl: settings.generationEndpoint,
+            apiKey: settings.generationApiKey,
+            model: settings.generationModel,
+            temp: settings.generationTemperature ?? undefined
+        }
+        : {
+            ...(settings.generationUseCurrentModelOverride && settings.generationModel
+                ? { model: settings.generationModel }
+                : {}),
+            ...(settings.generationTemperature != null
+                ? { temp: settings.generationTemperature }
+                : {})
+        };
+    const prompt = resolveMemoryPrompt(settings)
+        .replaceAll('{{user}}', playerName)
+        .replaceAll('{{char}}', activeChatChar?.name || 'Character');
+    const finalPrompt = [
+        prompt,
+        continuity ? `Previous approved memory context:\n${continuity}` : '',
+        loreContext ? `Historical lore trigger candidates:\n${loreContext}` : '',
+        summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : ''
+    ].filter(Boolean).join('\n\n');
+
+    const firstMessage = selected[0];
+    const lastMessage = selected[selected.length - 1];
+    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
+    if (!selectedIds.length) return false;
+
+    const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
+        includeEntries: true,
+        includeDrafts: true,
+        overlapThreshold: source === 'manual_draft' ? 0.95 : 0.8
+    });
+    if (conflictingEntry) {
+        if (source === 'manual_draft') {
+            showToast(conflictingEntry.reason === 'exact'
+                ? 'A memory entry or draft already exists for this exact segment'
+                : 'A very similar memory entry or draft already covers most of this segment');
+        }
+        return false;
+    }
+
+    try {
+        automation.isGeneratingDraft = true;
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+
+        startMemoryDraftProgress(source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
+        if (bottomSheetState.title === 'Memory Books') {
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
+        showToast('Generating memory draft...', 2000);
+        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, apiConfigOverride });
+        const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
+
+        if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+        memoryBook.pendingDrafts.push(normalizeMemoryEntryShape({
+            id: genMemoryEntryId(),
+            title: `Draft ${memoryBook.pendingDrafts.length + 1}`,
+            content: (parsedDraft.content || '').trim(),
+            keys: parsedDraft.keys,
+            glazeKeys: [],
+            vectorSearch: vectorEnabled,
+            messageIds: selectedIds,
+            messageRange: {
+                startMessageId: firstMessage.id,
+                endMessageId: lastMessage.id
+            },
+            status: 'pending_approval',
+            source,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        }));
+        memoryBook.updatedAt = Date.now();
+        automation.isGeneratingDraft = false;
+        await db.saveChat(activeChatChar.id, chatData);
+        stopMemoryDraftProgress();
+        showToast('Memory draft created');
+        if (openSheet) openMemoryBooksSheet();
+        return true;
+    } catch (error) {
+        automation.isGeneratingDraft = false;
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        stopMemoryDraftProgress();
+        console.error('Failed to generate memory draft:', error);
+        showToast(`Memory draft failed: ${formatError(error)}`);
+        return false;
+    }
+}
+
+async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
+    const stableCount = stableMessages.length;
+    const interval = normalizeAutoCreateInterval(memoryBook);
+    const delayed = memoryBook.settings?.useDelayedAutomation !== false;
+    const lastRole = getLastStableConversationRole(stableMessages);
+
+    if (!stableCount || !lastRole) {
+        automation.lastProcessedMessageCount = stableCount;
+        automation.pendingTrigger = null;
+        return false;
+    }
+
+    if (automation.pendingTrigger) {
+        const completedExchanges = countCompletedExchangesSince(automation.pendingTrigger.triggerCount, stableCount);
+        if (completedExchanges >= automation.pendingTrigger.waitExchanges) {
+            const selected = resolvePendingTriggerMessages(stableMessages, automation.pendingTrigger);
+            const created = await generateMemoryDraftForMessages(selected, { source: 'auto_delayed' });
+            automation.lastProcessedMessageCount = stableCount;
+            automation.pendingTrigger = null;
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            return created;
+        }
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    if (!allowImmediate || automation.isGeneratingDraft || stableCount < interval) {
+        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    const nextThreshold = Math.floor(stableCount / interval) * interval;
+    if (nextThreshold <= 0 || nextThreshold <= automation.lastProcessedMessageCount) {
+        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    if (delayed) {
+        const windowEndExclusive = nextThreshold;
+        const windowStartIndex = Math.max(0, windowEndExclusive - interval);
+        const windowMessages = stableMessages.slice(windowStartIndex, windowEndExclusive);
+        automation.pendingTrigger = {
+            triggerCount: stableCount,
+            triggerRole: lastRole,
+            waitExchanges: computeDelayedWaitExchanges(lastRole),
+            windowStartIndex,
+            windowEndIndex: Math.max(windowStartIndex, windowEndExclusive - 1),
+            messageIds: windowMessages.map(msg => msg.id).filter(Boolean),
+            createdAt: Date.now()
+        };
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        return false;
+    }
+
+    const selected = stableMessages.slice(Math.max(0, stableCount - interval), stableCount);
+    const created = await generateMemoryDraftForMessages(selected, { source: 'auto_immediate' });
+    automation.lastProcessedMessageCount = stableCount;
+    memoryBook.updatedAt = Date.now();
+    await db.saveChat(activeChatChar.id, chatData);
+    return created;
+}
+
+async function bootstrapImportedMemoryDrafts(charId, sessionId) {
+    const chatData = await getChatData(charId);
+    if (!chatData?.sessions?.[sessionId]) return 0;
+
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const automation = ensureMemoryAutomationState(memoryBook);
+    const existingEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries.length : 0;
+    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0;
+    if (existingEntries > 0 || existingDrafts > 0) return 0;
+
+    const interval = normalizeAutoCreateInterval(memoryBook);
+    const segments = buildBootstrapSegments(chatData.sessions[sessionId], interval);
+    if (!segments.length) return 0;
+
+    let createdCount = 0;
+    automation.pendingTrigger = null;
+    for (const segment of segments) {
+        const created = await generateMemoryDraftForMessages(segment, { source: 'import_bootstrap' });
+        if (created) createdCount += 1;
+    }
+
+    const latestData = await getChatData(charId);
+    if (!latestData?.sessions?.[sessionId]) return createdCount;
+    const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
+    const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
+    latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
+    latestAutomation.pendingTrigger = null;
+    latestMemoryBook.updatedAt = Date.now();
+    await db.saveChat(charId, latestData);
+    return createdCount;
+}
+
+function openMemoryTextPreview(entry, kind = 'Memory') {
+    if (!entry) return;
+    const keys = Array.isArray(entry.keys) && entry.keys.length
+        ? entry.keys.map(key => `<span class="memory-chip">${String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('')
+        : '<span class="context-sheet-note">No keys yet</span>';
+    const isApprovedEntry = kind === 'Memory Entry';
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>${kind}</label>
+            <div class="context-sheet-note">${(entry.title || kind).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>
+        <div class="settings-item">
+            <label>Retrieval</label>
+            <div class="context-sheet-note">Vector search: ${entry.vectorSearch ? 'enabled' : 'disabled'}</div>
+            <div class="memory-chip-list">${keys}</div>
+        </div>
+        <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <div class="context-sheet-actions">
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
+            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">Close</button>
+        </div>
+    `;
+    content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryEntryEditor(entry.id), 50);
+    });
+    content.querySelector('#memory-preview-reindex')?.addEventListener('click', async () => {
+        if (!activeChatChar) return;
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        if (!getMemoryVectorSearchEnabled(memoryBook)) {
+            showToast('Enable Memory Books vector search first');
+            return;
+        }
+        const reindexButton = content.querySelector('#memory-preview-reindex');
+        try {
+            reindexButton.disabled = true;
+            reindexButton.textContent = 'Reindexing...';
+            showToast('Reindexing memory entry...', 1500);
+            entry.vectorSearch = true;
+            await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
+            entry.updatedAt = Date.now();
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            showToast('Memory entry reindexed');
+        } catch (error) {
+            console.error('Failed to reindex memory entry:', error);
+            showToast(`Reindex failed: ${formatError(error)}`);
+        } finally {
+            reindexButton.disabled = false;
+            reindexButton.textContent = 'Reindex';
+        }
+    });
+    content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
+        if (!activeChatChar) return;
+        const chatData = await getChatData(activeChatChar.id);
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        await deleteMemoryEntryIndexIfPresent(entry.id);
+        memoryBook.entries = memoryBook.entries.filter(item => item.id !== entry.id);
+        memoryBook.updatedAt = Date.now();
+        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+        chatData.sessions[sessionId] = currentMessages.value;
+        await db.saveChat(activeChatChar.id, chatData);
+        closeBottomSheet();
+        setTimeout(() => openMemoryBooksSheet(), 50);
+    });
+    content.querySelector('#memory-preview-close')?.addEventListener('click', () => closeBottomSheet());
+    showBottomSheet({ title: kind, content, isSolid: true });
+}
+
+async function openMessageMemoryCoverage(message) {
+    if (!activeChatChar || !message) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const coverage = message.memoryCoverage && typeof message.memoryCoverage === 'object'
+        ? message.memoryCoverage
+        : createEmptyMemoryCoverage();
+    const entryIds = Array.isArray(coverage.entryIds) ? coverage.entryIds : [];
+    const matchedEntries = (Array.isArray(memoryBook.entries) ? memoryBook.entries : [])
+        .filter(entry => entryIds.includes(entry.id));
+
+    if (!matchedEntries.length) {
+        if (coverage.needsRebuild) {
+            showToast('This message is marked for memory rebuild');
+        } else if (coverage.stale) {
+            showToast('This message has stale memory coverage');
+        } else {
+            showToast('No linked memory entries for this message');
+        }
+        return;
+    }
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Message Memory Coverage</label>
+            <div class="context-sheet-note">This message is linked to ${matchedEntries.length} memory ${matchedEntries.length === 1 ? 'entry' : 'entries'}.</div>
+            ${coverage.needsRebuild ? '<div class="context-sheet-note" style="color: var(--warning-color, #ffb84d);">Coverage needs rebuild.</div>' : ''}
+            ${coverage.stale ? '<div class="context-sheet-note" style="color: var(--danger-color, #ff6b6b);">Coverage is marked stale.</div>' : ''}
+        </div>
+        <div class="memory-entry-list">
+            ${matchedEntries.map(entry => `
+                <button type="button" class="memory-entry-card" data-coverage-entry-id="${entry.id}">
+                    <div class="memory-entry-title-row">
+                        <strong>${String(entry.title || 'Memory Entry').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
+                        <span class="context-sheet-note">${String(entry.status || 'active').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                    </div>
+                    <div class="context-sheet-note">${normalizeEntryMessageIds(entry).length} linked message${normalizeEntryMessageIds(entry).length === 1 ? '' : 's'}</div>
+                </button>
+            `).join('')}
+        </div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-coverage-close">Close</button>
+        </div>
+    `;
+
+    content.querySelectorAll('[data-coverage-entry-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const entryId = btn.getAttribute('data-coverage-entry-id');
+            const entry = matchedEntries.find(item => item.id === entryId);
+            if (!entry) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        });
+    });
+    content.querySelector('#memory-coverage-close')?.addEventListener('click', () => closeBottomSheet());
+    showBottomSheet({ title: 'Message Memory Coverage', content, isSolid: true });
+}
+
+async function removeMemoryFromSelection() {
+    if (!activeChatChar || selectedMessages.value.size === 0) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const selectedIds = new Set(currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id)).map(msg => msg.id));
+    if (!selectedIds.size) return;
+
+    const removedEntryIds = memoryBook.entries
+        .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
+        .map(entry => entry.id);
+
+    if (!removedEntryIds.length) {
+        clearSelection();
+        return;
+    }
+
+    memoryBook.entries = memoryBook.entries.filter(entry => !removedEntryIds.includes(entry.id));
+    memoryBook.updatedAt = Date.now();
+
+    for (const msg of currentMessages.value) {
+        if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
+        const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
+        msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
+        if (wasCovered) {
+            msg.memoryCoverage.needsRebuild = true;
+            msg.memoryCoverage.stale = false;
+        }
+    }
+
+    chatData.sessions[sessionId] = currentMessages.value;
+    await db.saveChat(activeChatChar.id, chatData);
+    clearSelection();
+}
+
+async function openMemoryGenerationSettings() {
+    if (!activeChatChar) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    if (!memoryBook.settings) memoryBook.settings = {};
+    const currentApiConfig = getApiConfig();
+    const settings = memoryBook.settings;
+    const state = {
+        source: settings.generationSource || 'current',
+        model: settings.generationModel || '',
+        useCurrentModelOverride: settings.generationUseCurrentModelOverride === true,
+        endpoint: settings.generationEndpoint || '',
+        apiKey: settings.generationApiKey || '',
+        temperature: settings.generationTemperature,
+        promptPreset: settings.promptPreset || 'strict_factual',
+        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
+            ? Number(settings.autoCreateInterval)
+            : 12,
+        useDelayedAutomation: settings.useDelayedAutomation !== false,
+        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
+            ? Number(settings.maxInjectedEntries)
+            : 3,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block'
+    };
+
+    const renderSheet = () => {
+        const content = document.createElement('div');
+        content.className = 'context-sheet';
+        const currentEndpointLabel = currentApiConfig.apiUrl || 'Not configured';
+        const currentModelLabel = currentApiConfig.model || 'Not configured';
+        content.innerHTML = `
+            <div class="settings-item">
+                <label>Provider</label>
+                <div class="clickable-selector" id="memory-provider-selector">
+                    <span>${state.source === 'current' ? 'Current provider' : 'Custom provider'}</span>
+                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
+            </div>
+            ${state.source === 'current'
+                ? `
+                    <div class="settings-item">
+                        <label>Using Current API Settings</label>
+                        <div class="context-sheet-note">Endpoint: ${currentEndpointLabel.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                        <div class="context-sheet-note">Model: ${(state.useCurrentModelOverride && state.model ? state.model : currentModelLabel).replace(/</g, '&lt;').replace(/>/g, '&gt;')}${state.useCurrentModelOverride && state.model ? ' (override)' : ''}</div>
+                    </div>
+                    <div class="settings-item">
+                        <label style="display:flex; align-items:center; gap:8px;">
+                            <input id="memory-current-model-override-toggle" type="checkbox" ${state.useCurrentModelOverride ? 'checked' : ''}>
+                            <span>Override current model</span>
+                        </label>
+                    </div>
+                    <div class="settings-item" id="memory-current-model-override-field" style="display:${state.useCurrentModelOverride ? 'block' : 'none'};">
+                        <label>Override Model</label>
+                        <input id="memory-current-model-input" type="text" value="${state.model.replace(/"/g, '&quot;')}" placeholder="Model name">
+                    </div>
+                `
+                : `
+                    <div class="settings-item">
+                        <label>Model</label>
+                        <input id="memory-model-input" type="text" value="${state.model.replace(/"/g, '&quot;')}" placeholder="Model name">
+                    </div>
+                `
+            }
+            <div class="settings-item">
+                <label>Generation Rules</label>
+                <div class="clickable-selector" id="memory-prompt-selector">
+                    <span>${getMemoryPromptLabel(settings)}</span>
+                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
+                <button type="button" class="memory-inline-link" id="memory-prompt-preview-btn">Preview Rule</button>
+            </div>
+            <div class="settings-item">
+                <label>Temperature Override</label>
+                <input id="memory-temperature-input" type="number" min="0" max="2" step="0.05" value="${state.temperature ?? ''}" placeholder="Use current API temperature">
+            </div>
+            <div class="settings-item">
+                <label>Create Memory Every N Messages</label>
+                <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="12">
+                <div class="context-sheet-note">User-facing interval for future automatic memory creation and import bootstrap segmentation.</div>
+            </div>
+            <div class="settings-item-checkbox">
+                <div class="settings-text-col">
+                    <label>Work With Delay</label>
+                    <div class="settings-desc">Wait for extra turns before auto-creating a memory draft, so the last user message and latest assistant reply can still be edited or regenerated safely.</div>
+                </div>
+                <input id="memory-delayed-automation-toggle" type="checkbox" class="vk-switch" ${state.useDelayedAutomation ? 'checked' : ''}>
+            </div>
+            <div class="settings-item">
+                <label>Memory Entries In Prompt</label>
+                <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="3">
+                <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
+            </div>
+            <div class="settings-item">
+                <label>Injection Target</label>
+                <div class="clickable-selector" id="memory-injection-target-selector">
+                    <span>${state.injectionTarget === 'summary_macro' ? '{{summary}} macro' : 'Chat summary block'}</span>
+                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
+                <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
+            </div>
+            <div id="memory-custom-fields" style="display:${state.source === 'custom' ? 'block' : 'none'};">
+                <div class="settings-item">
+                    <label>Endpoint</label>
+                    <input id="memory-endpoint-input" type="text" value="${state.endpoint.replace(/"/g, '&quot;')}" placeholder="https://.../v1">
+                </div>
+                <div class="settings-item">
+                    <label>API Key</label>
+                    <input id="memory-apikey-input" type="password" value="${state.apiKey.replace(/"/g, '&quot;')}" placeholder="Optional API key">
+                </div>
+            </div>
+            <div class="context-sheet-actions">
+                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-settings-cancel">Cancel</button>
+                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-settings-save">Save</button>
+            </div>
+        `;
+
+        content.querySelector('#memory-provider-selector')?.addEventListener('click', () => {
+            closeBottomSheet();
+            showBottomSheet({
+                title: 'Memory Provider',
+                items: [
+                    {
+                        label: 'Current provider',
+                        onClick: () => {
+                            state.source = 'current';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    },
+                    {
+                        label: 'Custom provider',
+                        onClick: () => {
+                            state.source = 'custom';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    }
+                ]
+            });
+        });
+
+        content.querySelector('#memory-prompt-selector')?.addEventListener('click', () => {
+            closeBottomSheet();
+            const promptItems = getMemoryPromptOptions(settings).map(item => ({
+                label: item.label,
+                onClick: () => {
+                    settings.promptPreset = item.key;
+                    closeBottomSheet();
+                    setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                }
+            }));
+            promptItems.push({
+                label: `Preview: ${getMemoryPromptLabel(settings)}`,
+                onClick: () => {
+                    const selected = getMemoryPromptOptions(settings).find(item => item.key === settings.promptPreset);
+                    closeBottomSheet();
+                    setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
+                }
+            });
+            promptItems.push({
+                label: 'Manage custom prompts',
+                onClick: () => {
+                    closeBottomSheet();
+                    setTimeout(() => openMemoryPromptManager(), 50);
+                }
+            });
+            showBottomSheet({ title: 'Generation Rules', items: promptItems });
+        });
+
+        content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
+            const selected = getMemoryPromptOptions(settings).find(item => item.key === settings.promptPreset);
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
+        });
+
+        content.querySelector('#memory-injection-target-selector')?.addEventListener('click', () => {
+            closeBottomSheet();
+            showBottomSheet({
+                title: 'Memory Injection Target',
+                items: [
+                    {
+                        label: 'Chat summary block',
+                        onClick: () => {
+                            state.injectionTarget = 'summary_block';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    },
+                    {
+                        label: '{{summary}} macro',
+                        onClick: () => {
+                            state.injectionTarget = 'summary_macro';
+                            closeBottomSheet();
+                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+                        }
+                    }
+                ]
+            });
+        });
+
+        content.querySelector('#memory-current-model-override-toggle')?.addEventListener('change', (event) => {
+            state.useCurrentModelOverride = event.target.checked;
+            closeBottomSheet();
+            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
+        });
+
+        content.querySelector('#memory-settings-cancel')?.addEventListener('click', () => {
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        });
+        content.querySelector('#memory-settings-save')?.addEventListener('click', async () => {
+            settings.generationSource = state.source;
+            settings.generationUseCurrentModelOverride = state.source === 'current'
+                ? !!content.querySelector('#memory-current-model-override-toggle')?.checked
+                : false;
+            settings.generationModel = state.source === 'custom'
+                ? (content.querySelector('#memory-model-input')?.value?.trim() || '')
+                : (settings.generationUseCurrentModelOverride
+                    ? (content.querySelector('#memory-current-model-input')?.value?.trim() || '')
+                    : '');
+            settings.generationEndpoint = state.source === 'custom'
+                ? (content.querySelector('#memory-endpoint-input')?.value?.trim() || '')
+                : '';
+            settings.generationApiKey = state.source === 'custom'
+                ? (content.querySelector('#memory-apikey-input')?.value || '')
+                : '';
+            const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
+            settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
+            const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
+            settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
+            settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
+            const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
+            settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
+            settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+            settings.promptPreset = settings.promptPreset || state.promptPreset || 'strict_factual';
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        });
+
+        return content;
+    };
+
+    showBottomSheet({
+        title: 'Memory Generation',
+        content: renderSheet(),
+        isSolid: true
+    });
+}
+
+async function openMemoryPromptManager() {
+    if (!activeChatChar) return;
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const settings = memoryBook.settings || {};
+    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    const promptCards = settings.customPrompts.length
+        ? settings.customPrompts.map(item => `
+            <div class="memory-entry-card" data-prompt-id="${item.id}">
+                <div class="memory-entry-head">
+                    <div>
+                        <div class="memory-entry-title">${(item.name || 'Custom prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                        <div class="memory-entry-meta">custom prompt</div>
+                    </div>
+                    <div class="memory-draft-actions">
+                        <button type="button" class="memory-entry-approve" data-prompt-edit="${item.id}">Edit</button>
+                        <button type="button" class="memory-entry-delete" data-prompt-delete="${item.id}">Delete</button>
+                    </div>
+                </div>
+                <div class="memory-entry-preview">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180)}</div>
+            </div>
+        `).join('')
+        : '<div class="context-sheet-note">No custom prompts yet.</div>';
+
+    content.innerHTML = `
+        <div class="context-sheet-actions" style="margin-top: 0; margin-bottom: 12px;">
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-add">Add Prompt</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-close">Close</button>
+        </div>
+        <div class="memory-entry-list">${promptCards}</div>
+    `;
+
+    content.querySelector('#memory-prompt-add')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryPromptEditor(), 50);
+    });
+    content.querySelector('#memory-prompt-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelectorAll('[data-prompt-id]').forEach(card => {
+        card.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            const promptId = card.getAttribute('data-prompt-id');
+            const prompt = settings.customPrompts.find(item => item.id === promptId);
+            if (!prompt) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptPreview(
+                { label: prompt.name || 'Custom prompt', prompt: prompt.prompt || '' },
+                { onClose: openMemoryPromptManager }
+            ), 50);
+        });
+    });
+    content.querySelectorAll('[data-prompt-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const promptId = btn.getAttribute('data-prompt-delete');
+            settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
+            if (settings.promptPreset === promptId) settings.promptPreset = 'strict_factual';
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptManager(), 50);
+        });
+    });
+    content.querySelectorAll('[data-prompt-edit]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const promptId = btn.getAttribute('data-prompt-edit');
+            const prompt = settings.customPrompts.find(item => item.id === promptId);
+            if (!prompt) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptEditor(prompt), 50);
+        });
+    });
+
+    showBottomSheet({ title: 'Generation Rules', content, isSolid: true });
+}
+
+async function openMemoryPromptEditor(existing = null) {
+    if (!activeChatChar) return;
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const settings = memoryBook.settings || {};
+    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
+
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    content.innerHTML = `
+        <div class="settings-item">
+            <label>Name</label>
+            <input id="memory-prompt-name" type="text" value="${(existing?.name || '').replace(/"/g, '&quot;')}" placeholder="Prompt name">
+        </div>
+        <div class="settings-item">
+            <label>Prompt</label>
+            <textarea id="memory-prompt-text" rows="10" placeholder="Use {{history}}, {{user}}, {{char}}">${(existing?.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+        </div>
+        <div class="context-sheet-actions">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-cancel">Cancel</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-save">Save</button>
+        </div>
+    `;
+
+    content.querySelector('#memory-prompt-cancel')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelector('#memory-prompt-save')?.addEventListener('click', async () => {
+        const name = content.querySelector('#memory-prompt-name')?.value?.trim() || 'Custom prompt';
+        const prompt = content.querySelector('#memory-prompt-text')?.value?.trim() || '';
+        if (!prompt) {
+            showToast('Prompt text is required');
+            return;
+        }
+        if (existing) {
+            const target = settings.customPrompts.find(item => item.id === existing.id);
+            if (target) {
+                target.name = name;
+                target.prompt = prompt;
+            }
+        } else {
+            const created = { id: genMemoryPromptId(), name, prompt };
+            settings.customPrompts.push(created);
+            settings.promptPreset = created.id;
+        }
+        memoryBook.updatedAt = Date.now();
+        await db.saveChat(activeChatChar.id, chatData);
+        closeBottomSheet();
+        setTimeout(() => openMemoryPromptManager(), 50);
+    });
+
+    showBottomSheet({ title: existing ? 'Edit Prompt' : 'Add Prompt', content, isSolid: true });
+}
+
+async function openMemoryBooksSheet() {
+    if (!activeChatChar) return;
+
+    const chatData = await getChatData(activeChatChar.id);
+    const sessionId = activeChatChar.sessionId || chatData.currentId;
+    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
+    const content = document.createElement('div');
+    content.className = 'context-sheet';
+    let refreshTimer = null;
+
+    const entries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+    const pendingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
+    const stableConversationCount = countStableConversationMessages(currentMessages.value);
+    const generationSettingsSummary = [
+        `every ${normalizeAutoCreateInterval(memoryBook)} msgs`,
+        `${memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate'}`,
+        `${memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block'}`,
+        `${Math.max(1, Math.min(20, Number(memoryBook.settings?.maxInjectedEntries || 3)))} in prompt`
+    ].join(' • ');
+    const statusSummary = entries.reduce((acc, entry) => {
+        const status = entry?.status === 'needs_rebuild' ? 'needs_rebuild' : 'active';
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+    }, { active: 0, needs_rebuild: 0 });
+    const staleCoverageCount = currentMessages.value.filter(msg => msg?.memoryCoverage?.stale).length;
+    const statusSummaryCard = `
+        <div class="memory-status-summary">
+            <div class="memory-status-summary-item ok">
+                <strong>${statusSummary.active || 0}</strong>
+                <span>active</span>
+            </div>
+            <div class="memory-status-summary-item warning">
+                <strong>${statusSummary.needs_rebuild || 0}</strong>
+                <span>needs rebuild</span>
+            </div>
+            <div class="memory-status-summary-item danger">
+                <strong>${staleCoverageCount || 0}</strong>
+                <span>stale messages</span>
+            </div>
+            <div class="memory-status-summary-item draft">
+                <strong>${pendingDrafts.length || 0}</strong>
+                <span>drafts</span>
+            </div>
+        </div>
+    `;
+    const draftProgressCard = memoryDraftState.value.active
+        ? `
+            <div class="memory-generation-status-card">
+                <div class="memory-generation-status-row">
+                    <strong>${(memoryDraftState.value.label || 'Generating memory draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
+                    <span>${formatElapsedSeconds(memoryDraftState.value.elapsedMs)}</span>
+                </div>
+                <div class="context-sheet-note">The draft is still being created. You can keep this sheet open and watch the timer update.</div>
+            </div>
+        `
+        : '';
+    const entryCards = entries.length
+        ? entries.map(entry => {
+            const status = entry.status || 'active';
+            const count = Array.isArray(entry.messageIds) ? entry.messageIds.length : 0;
+            const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const keysMeta = Array.isArray(entry.keys) && entry.keys.length
+                ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
+                : '';
+            const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
+            const statusBadge = status === 'needs_rebuild'
+                ? '<span class="memory-status-badge warning">needs rebuild</span>'
+                : '<span class="memory-status-badge ok">active</span>';
+            const badges = `${statusBadge}${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}${entry.id ? '<span class="memory-status-badge indexed">idx</span>' : ''}`;
+            return `
+                <div class="memory-entry-card ${status === 'needs_rebuild' ? 'is-warning' : ''}" data-entry-id="${entry.id}">
+                    <div class="memory-entry-head">
+                        <div>
+                            <div class="memory-entry-title">${(entry.title || 'Untitled memory').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                            <div class="memory-entry-meta">${status} • ${count} messages${retrievalMeta}${keysMeta}</div>
+                        </div>
+                        <div class="memory-status-badges">${badges}</div>
+                    </div>
+                    <div class="memory-entry-preview">${preview || 'No content yet'}</div>
+                </div>
+            `;
+        }).join('')
+        : '<div class="context-sheet-note">No memory entries in this session yet.</div>';
+    const draftCards = pendingDrafts.length
+        ? pendingDrafts.map(entry => {
+            const preview = (entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180);
+            const keysMeta = Array.isArray(entry.keys) && entry.keys.length
+                ? ` • ${entry.keys.slice(0, 3).map(key => String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')).join(', ')}`
+                : '';
+            const retrievalMeta = vectorEnabled ? ' • hybrid' : ' • keys';
+            const badges = `<span class="memory-status-badge draft">draft</span>${vectorEnabled ? '<span class="memory-status-badge vector">vec</span>' : ''}`;
+            return `
+                <div class="memory-entry-card" data-draft-id="${entry.id}">
+                    <div class="memory-entry-head">
+                        <div>
+                            <div class="memory-entry-title">${(entry.title || 'Untitled draft').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                            <div class="memory-entry-meta">pending approval${retrievalMeta}${keysMeta}</div>
+                        </div>
+                        <div class="memory-draft-actions">
+                            ${badges}
+                            <button type="button" class="memory-entry-approve" data-draft-approve="${entry.id}">Approve</button>
+                            <button type="button" class="memory-entry-delete" data-draft-delete="${entry.id}">Delete</button>
+                        </div>
+                    </div>
+                    <div class="memory-entry-preview">${preview || 'No content yet'}</div>
+                </div>
+            `;
+        }).join('')
+        : '';
+    const sessionOverviewCard = `
+        <div class="memory-session-overview">
+            <div class="memory-session-overview-head">
+                <div>
+                    <div class="memory-session-title">${(activeChatChar.name || 'Character').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                    <div class="context-sheet-note">Session ${String(sessionId).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+                <div class="memory-session-chip">${stableConversationCount} stable msgs</div>
+            </div>
+            <div class="memory-session-overview-meta">${generationSettingsSummary.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        </div>
+    `;
+    const draftSection = draftCards
+        ? `
+            <div class="memory-sheet-section">
+                <div class="memory-sheet-section-head">
+                    <label>Pending Drafts</label>
+                    <span>${pendingDrafts.length}</span>
+                </div>
+                <div class="memory-entry-list" style="margin-bottom: 12px;">${draftCards}</div>
+            </div>
+        `
+        : '';
+    const entrySection = `
+        <div class="memory-sheet-section">
+            <div class="memory-sheet-section-head">
+                <label>Approved Memories</label>
+                <span>${entries.length}</span>
+            </div>
+            <div class="memory-entry-list">${entryCards}</div>
+        </div>
+    `;
+
+    content.innerHTML = `
+        ${sessionOverviewCard}
+        <div class="settings-item">
+            <label>Key Match Mode</label>
+            <div class="clickable-selector" id="memory-sheet-key-mode-selector">
+                <span>${getMemoryKeyMatchMode(memoryBook) === 'glaze' ? 'Glaze boundaries' : getMemoryKeyMatchMode(memoryBook) === 'both' ? 'Plain + Glaze' : 'Plain contains'}</span>
+                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+            </div>
+            <div class="context-sheet-note">Keyword retrieval uses only the entry Keys field.</div>
+        </div>
+        <div class="settings-item-checkbox">
+            <div class="settings-text-col">
+                <label>Vector Search</label>
+                <div class="settings-desc">One shared retrieval mode for all memory entries in this session.</div>
+            </div>
+            <input id="memory-sheet-vector-toggle" type="checkbox" class="vk-switch" ${vectorEnabled ? 'checked' : ''} ${shouldEnableMemoryVectorSearch() ? '' : 'disabled'}>
+        </div>
+        ${shouldEnableMemoryVectorSearch() ? '' : '<div class="context-sheet-note">Embeddings are not configured, so vector search is unavailable.</div>'}
+        ${statusSummaryCard}
+        <div class="context-sheet-actions" style="margin-bottom: 12px;">
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-settings">Generation Settings</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-maintenance">Maintenance</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-sheet-reindex" ${vectorEnabled ? '' : 'disabled'}>Reindex All</button>
+            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-sheet-close">Close</button>
+        </div>
+        ${draftProgressCard}
+        ${draftSection}
+        ${entrySection}
+    `;
+
+    content.querySelector('#memory-sheet-settings')?.addEventListener('click', () => {
+        closeBottomSheet();
+        setTimeout(() => openMemoryGenerationSettings(), 50);
+    });
+    content.querySelector('#memory-sheet-maintenance')?.addEventListener('click', () => {
+        closeBottomSheet();
+        showBottomSheet({
+            title: 'Memory Maintenance',
+            items: [
+                {
+                    label: 'Cleanup coverage and drafts',
+                    onClick: async () => {
+                        try {
+                            const result = await runMemoryMaintenancePass(chatData, sessionId, { reindex: false });
+                            closeBottomSheet();
+                            showToast(`Maintenance complete: ${result.removedEntries} entries removed, ${result.clearedDrafts} drafts cleared, ${result.rebuildEntries} entries need rebuild`);
+                            setTimeout(() => openMemoryBooksSheet(), 50);
+                        } catch (error) {
+                            console.error('Memory maintenance failed:', error);
+                            showToast(`Maintenance failed: ${formatError(error)}`);
+                        }
+                    }
+                },
+                {
+                    label: 'Cleanup and reindex',
+                    onClick: async () => {
+                        try {
+                            const result = await runMemoryMaintenancePass(chatData, sessionId, { reindex: true });
+                            closeBottomSheet();
+                            showToast(`Maintenance + reindex complete: ${result.removedEntries} entries removed, ${result.clearedDrafts} drafts cleared`);
+                            setTimeout(() => openMemoryBooksSheet(), 50);
+                        } catch (error) {
+                            console.error('Memory maintenance reindex failed:', error);
+                            showToast(`Maintenance failed: ${formatError(error)}`);
+                        }
+                    }
+                },
+                {
+                    label: 'Back to Memory Books',
+                    onClick: () => {
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                }
+            ]
+        });
+    });
+    content.querySelector('#memory-sheet-key-mode-selector')?.addEventListener('click', () => {
+        closeBottomSheet();
+        showBottomSheet({
+            title: 'Memory Key Match Mode',
+            items: [
+                {
+                    label: 'Plain contains',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'plain';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                },
+                {
+                    label: 'Glaze boundaries',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'glaze';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                },
+                {
+                    label: 'Plain + Glaze',
+                    onClick: async () => {
+                        memoryBook.settings.keyMatchMode = 'both';
+                        memoryBook.updatedAt = Date.now();
+                        await db.saveChat(activeChatChar.id, chatData);
+                        closeBottomSheet();
+                        setTimeout(() => openMemoryBooksSheet(), 50);
+                    }
+                }
+            ]
+        });
+    });
+    content.querySelector('#memory-sheet-vector-toggle')?.addEventListener('change', async (event) => {
+        const enabled = !!event.target.checked;
+        memoryBook.settings.vectorSearchEnabled = enabled;
+        setMemoryVectorSearchOnEntries(memoryBook, enabled);
+        memoryBook.updatedAt = Date.now();
+        try {
+            if (enabled) {
+                showToast('Reindexing memory entries...', 1500);
+                await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+                showToast('Memory vector search enabled');
+            } else {
+                const approvedEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
+                for (const entry of approvedEntries) {
+                    await deleteMemoryEntryIndexIfPresent(entry.id);
+                }
+                showToast('Memory vector search disabled');
+            }
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to toggle memory vector search:', error);
+            showToast(`Vector toggle failed: ${formatError(error)}`);
+        }
+    });
+    content.querySelector('#memory-sheet-reindex')?.addEventListener('click', async () => {
+        const button = content.querySelector('#memory-sheet-reindex');
+        try {
+            button.disabled = true;
+            button.textContent = 'Reindexing...';
+            showToast('Reindexing memory entries...', 1500);
+            await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            showToast('Memory entries reindexed');
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        } catch (error) {
+            console.error('Failed to reindex memory entries:', error);
+            showToast(`Reindex failed: ${formatError(error)}`);
+            button.disabled = false;
+            button.textContent = 'Reindex All';
+        }
+    });
+    content.querySelector('#memory-sheet-close')?.addEventListener('click', () => closeBottomSheet());
+    content.querySelectorAll('[data-entry-id]').forEach(card => {
+        card.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            const entryId = card.getAttribute('data-entry-id');
+            const entry = memoryBook.entries.find(item => item.id === entryId);
+            if (!entry) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        });
+    });
+    content.querySelectorAll('[data-draft-id]').forEach(card => {
+        card.addEventListener('click', (event) => {
+            if (event.target.closest('button')) return;
+            const draftId = card.getAttribute('data-draft-id');
+            const entry = memoryBook.pendingDrafts.find(item => item.id === draftId);
+            if (!entry) return;
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Draft'), 50);
+        });
+    });
+    content.querySelectorAll('[data-entry-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const entryId = btn.getAttribute('data-entry-delete');
+            await deleteMemoryEntryIndexIfPresent(entryId);
+            memoryBook.entries = memoryBook.entries.filter(entry => entry.id !== entryId);
+            memoryBook.updatedAt = Date.now();
+            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+            chatData.sessions[sessionId] = currentMessages.value;
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        });
+    });
+    content.querySelectorAll('[data-draft-approve]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const draftId = btn.getAttribute('data-draft-approve');
+            const draft = memoryBook.pendingDrafts.find(entry => entry.id === draftId);
+            if (!draft) return;
+            const draftIds = normalizeEntryMessageIds(draft);
+            const conflictingApproved = findConflictingMemoryEntry(memoryBook, draftIds, {
+                includeEntries: true,
+                includeDrafts: false,
+                overlapThreshold: 0.8
+            });
+            if (conflictingApproved) {
+                showToast(conflictingApproved.reason === 'exact'
+                    ? 'An approved memory entry already exists for this segment'
+                    : 'An approved memory entry already overlaps most of this draft');
+                return;
+            }
+            const approvedEntry = normalizeMemoryEntryShape({ ...draft, status: 'active', vectorSearch: vectorEnabled });
+            memoryBook.entries.push(approvedEntry);
+            memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
+            memoryBook.updatedAt = Date.now();
+            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
+            chatData.sessions[sessionId] = currentMessages.value;
+            await db.saveChat(activeChatChar.id, chatData);
+            await indexMemoryEntryIfNeeded(approvedEntry, activeChatChar.id, sessionId);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        });
+    });
+    content.querySelectorAll('[data-draft-delete]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const draftId = btn.getAttribute('data-draft-delete');
+            memoryBook.pendingDrafts = memoryBook.pendingDrafts.filter(entry => entry.id !== draftId);
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        });
+    });
+
+    showBottomSheet({ title: 'Memory Books', content, isSolid: true });
+
+    if (memoryDraftState.value.active) {
+        refreshTimer = setTimeout(() => {
+            if (bottomSheetState.title === 'Memory Books' && memoryDraftState.value.active) {
+                closeBottomSheet();
+                setTimeout(() => openMemoryBooksSheet(), 30);
+            }
+        }, 300);
+    }
 }
 
 async function deleteSelectedMessages() {
     if (selectedMessages.value.size === 0) return;
     
     // Filter messages
-    const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.timestamp));
+    const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
     const count = currentMessages.value.length - newMsgs.length;
     currentMessages.value = newMsgs;
     
@@ -142,6 +2084,7 @@ async function deleteSelectedMessages() {
 
         let chatData = await getChatData(activeChatChar.id);
         const sessionId = activeChatChar.sessionId || chatData.currentId;
+        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
         chatData.sessions[sessionId] = currentMessages.value;
         await db.saveChat(activeChatChar.id, chatData);
         updateContextCutoff();
@@ -154,7 +2097,7 @@ async function toggleHideSelectedMessages() {
     if (selectedMessages.value.size === 0) return;
     
     for (const msg of currentMessages.value) {
-        if (msg && selectedMessages.value.has(msg.timestamp)) {
+        if (msg && selectedMessages.value.has(msg.id)) {
             msg.isHidden = !msg.isHidden;
         }
     }
@@ -224,6 +2167,104 @@ window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 
 // Helper to access translations
 const t = (key) => translations[currentLang.value]?.[key] || key;
+
+const contextSegments = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown || !breakdown.safeContext) return { used: [], reserve: null };
+
+    const total = breakdown.safeContext;
+    const toPercent = (value) => Math.max(0, Math.min(100, (value / total) * 100));
+    const used = [];
+
+    if (breakdown.character > 0) {
+        used.push({ key: 'character', value: breakdown.character, percent: toPercent(breakdown.character), className: 'segment-character' });
+    }
+    if (breakdown.preset > 0) {
+        used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
+    }
+    if (breakdown.authorsNote > 0) {
+        used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
+    }
+    if (breakdown.summary > 0) {
+        used.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
+    }
+    if (breakdown.memory > 0) {
+        used.push({ key: 'memory', value: breakdown.memory, percent: toPercent(breakdown.memory), className: 'segment-memory' });
+    }
+    if (breakdown.lorebook > 0) {
+        used.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
+    }
+    if (breakdown.history > 0) {
+        used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
+    }
+
+    return {
+        used,
+        reserve: breakdown.lorebookReserve > 0
+            ? { key: 'lorebookReserve', value: breakdown.lorebookReserve, percent: toPercent(breakdown.lorebookReserve), className: 'segment-lorebook-reserve' }
+            : null
+    };
+});
+
+const contextBreakdownItems = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown) return [];
+
+    return [
+        { key: 'character', label: 'Character', value: breakdown.character || 0 },
+        { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
+        { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
+        { key: 'summary', label: 'Summary Base', value: breakdown.summaryBase ?? breakdown.summary ?? 0 },
+        { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
+        { key: 'summaryCombined', label: 'Summary Total', value: breakdown.summary || 0 },
+        { key: 'lorebook', label: 'Lorebook Used', value: breakdown.lorebook || 0 },
+        { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
+        { key: 'history', label: 'History', value: breakdown.history || 0 }
+    ];
+});
+
+const contextLegendItems = computed(() => [
+    { key: 'character', label: 'Character', className: 'segment-character' },
+    { key: 'preset', label: 'Preset', className: 'segment-fixed' },
+    { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
+    { key: 'summary', label: 'Summary', className: 'segment-summary' },
+    { key: 'memory', label: 'Memory', className: 'segment-memory' },
+    { key: 'lorebook', label: 'Lorebook Used', className: 'segment-lorebook' },
+    { key: 'history', label: 'History', className: 'segment-history' },
+    { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
+]);
+
+const visibleHistoryMessages = computed(() => {
+    return currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
+});
+
+const historyUsagePercent = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown) return 0;
+    const available = breakdown.availableForHistory || 0;
+    if (available <= 0) return breakdown.history > 0 ? 100 : 0;
+    return Math.max(0, Math.min(100, Math.round(((breakdown.history || 0) / available) * 100)));
+});
+
+const historyHidePreview = computed(() => {
+    const messages = visibleHistoryMessages.value;
+    const percent = Math.max(1, Math.min(95, historyHidePercent.value || 30));
+    if (!messages.length) return { count: 0, tokens: 0 };
+
+    const count = Math.max(1, Math.min(messages.length, Math.ceil(messages.length * percent / 100)));
+    const tokens = messages
+        .slice(0, count)
+        .reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
+
+    return { count, tokens };
+});
+
+const shouldRecommendHide = computed(() => {
+    const breakdown = contextBreakdown.value;
+    if (!breakdown || !breakdown.history) return false;
+    const threshold = Math.max(1, Math.min(100, historyFillThreshold.value || 85));
+    return historyUsagePercent.value >= threshold;
+});
 
 let autoSyncRunning = false;
 async function triggerAutoSyncCheck() {
@@ -858,7 +2899,14 @@ async function openChat(char, onBack, force = false) {
     // Filter out corrupted/null messages
     msgs = msgs.filter(m => m !== null && m !== undefined);
     // Backfill unique IDs for legacy messages
-    msgs.forEach(m => { if (!m.id) m.id = `legacy_${m.timestamp || Date.now()}_${Math.random().toString(36).slice(2, 6)}`; });
+    msgs.forEach(m => {
+        if (!m.id) m.id = `legacy_${m.timestamp || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        if (!Array.isArray(m.contextRefs)) m.contextRefs = [];
+        if (!m.memoryCoverage || typeof m.memoryCoverage !== 'object') m.memoryCoverage = createEmptyMemoryCoverage();
+        if (!Array.isArray(m.memoryCoverage.entryIds)) m.memoryCoverage.entryIds = [];
+        if (typeof m.memoryCoverage.needsRebuild !== 'boolean') m.memoryCoverage.needsRebuild = false;
+        if (typeof m.memoryCoverage.stale !== 'boolean') m.memoryCoverage.stale = false;
+    });
     chatData.sessions[currentSessionId] = msgs;
 
     // Cleanup phantom generations or errors
@@ -946,7 +2994,8 @@ async function openChat(char, onBack, force = false) {
             greetingIndex: 0,
             swipes: greetings,
             swipeId: 0,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            ...createBaseMessageMeta()
         };
         currentMessages.value.push(firstMsg);
         if (activeChatChar) {
@@ -1222,7 +3271,8 @@ async function sendMessage(attachedImage = null, guidanceText = null) {
             tokens: estimateTokens(processedText),
             persona: { ...activePersona.value },
             guidanceText: effectiveGuidance,
-            guidanceType: effectiveGuidanceType
+            guidanceType: effectiveGuidanceType,
+            ...createBaseMessageMeta()
         };
         currentMessages.value.push(msgData);
         if (activeChatChar) {
@@ -1340,7 +3390,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             swipeId: 0,
             isTyping: true, // Custom flag for UI
             guidanceText,
-            guidanceType
+            guidanceType,
+            ...createBaseMessageMeta()
         };
         currentMessages.value.push(msg);
         msgIndex = currentMessages.value.length - 1;
@@ -1544,7 +3595,9 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             content: m.text || "", 
             text: m.text || "", 
             image: (m.image && !m.imageHidden) ? m.image : null,
-            chatId: m.originalIndex 
+            chatId: m.originalIndex,
+            messageId: m.id || null,
+            contextRefs: Array.isArray(m.contextRefs) ? m.contextRefs : []
         }));
 
     let _bgUpdateTimer = null;
@@ -1590,7 +3643,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         type: 'normal',
         controller,
         callbacks: {
-            onPromptReady: async ({ loreEntries }) => {
+            onPromptReady: async ({ loreEntries, memoryEntries }) => {
                 let targetIndex = msgIndex;
                 // Place lorebooks on the user message that triggered this generation, if it exists
                 if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
@@ -1598,7 +3651,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 }
                 if (targetIndex !== -1 && currentMessages.value[targetIndex]) {
                     const m = currentMessages.value[targetIndex];
-                    m.triggeredLorebooks = loreEntries.map(e => ({
+                    const triggeredLorebooks = loreEntries.map(e => ({
                         id: e.id,
                         // Lorebook entry display name: ST-compatible field is `comment`
                         name: e.comment || e.name || e.keys?.[0] || 'Entry',
@@ -1606,6 +3659,30 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                         lorebookName: e.lorebookName,
                         lorebookId: e.lorebookId
                     }));
+                    const triggeredMemories = (memoryEntries || []).map(entry => ({
+                        id: entry.id,
+                        name: entry.title || 'Memory',
+                        content: entry.content || '',
+                        messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
+                    }));
+                    m.triggeredLorebooks = triggeredLorebooks;
+                    m.triggeredMemories = triggeredMemories;
+                    m.contextRefs = [
+                        ...triggeredLorebooks.map(entry => ({
+                        id: entry.id,
+                        type: 'lorebook',
+                        label: entry.name,
+                        sourceId: entry.lorebookId || null,
+                        sourceName: entry.lorebookName || null
+                        })),
+                        ...triggeredMemories.map(entry => ({
+                            id: entry.id,
+                            type: 'memory',
+                            label: entry.name,
+                            sourceId: sessionId,
+                            sourceName: 'Memory Book'
+                        }))
+                    ];
                     const data = await getChatData(char.id);
                     if (data) {
                         data.sessions[sessionId] = currentMessages.value;
@@ -1715,6 +3792,15 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
 
             sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
 
+            if (guidanceType === 'GENERATION') {
+                const autoData = await getChatData(char.id);
+                if (autoData) {
+                    const autoSessionId = char.sessionId || autoData.currentId;
+                    autoData.sessions[autoSessionId] = currentMessages.value;
+                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, { allowImmediate: true });
+                }
+            }
+
             // Notify application about generation end (after update)
             window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
         } else {
@@ -1768,6 +3854,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
                     
                     await db.saveChat(char.id, bgData);
+
+                    if (guidanceType === 'GENERATION') {
+                        await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
+                    }
+
                     sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
                     
                     // Mark unread
@@ -1916,6 +4007,15 @@ async function branchSession(msgIndex) {
     
     const newData = await getChatData(activeChatChar.id);
     newData.sessions[newData.currentId] = newHistory;
+    const newSessionId = newData.currentId;
+    const oldMemoryBook = data.memoryBooks?.[oldSessionId]
+        ? JSON.parse(JSON.stringify(data.memoryBooks[oldSessionId]))
+        : null;
+    if (oldMemoryBook) {
+        if (!newData.memoryBooks) newData.memoryBooks = {};
+        newData.memoryBooks[newSessionId] = oldMemoryBook;
+    }
+    reconcileSessionMemoryState(newData, newSessionId, newHistory);
     
     // Copy authors note
     if (oldAuthorsNote) {
@@ -2121,6 +4221,15 @@ function openMessageActions(msg, index) {
                 text = text.trim();
             }
             navigator.clipboard.writeText(text);
+            closeBottomSheet();
+        }
+    });
+
+    items.push({
+        label: t('action_select') || 'Select',
+        icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+        onClick: () => {
+            toggleSelection(msg.id);
             closeBottomSheet();
         }
     });
@@ -2672,10 +4781,15 @@ async function openSessionsSheet(char) {
                                 icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
                                 onClick: () => {
                                     closeBottomSheet();
-                                    triggerChatImport(char.id, null, async () => {
+                                    triggerChatImport(char.id, null, async (result) => {
                                         await loadChats();
-                                        const charObj = { ...char };
-                                        delete charObj.sessionId;
+                                        if (result?.sessionId) {
+                                            const createdDrafts = await bootstrapImportedMemoryDrafts(char.id, result.sessionId);
+                                            if (createdDrafts > 0) {
+                                                showToast(`Created ${createdDrafts} imported memory draft${createdDrafts === 1 ? '' : 's'}`);
+                                            }
+                                        }
+                                        const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
                                         openChat(charObj, null, true);
                                     });
                                 }
@@ -2997,6 +5111,7 @@ onBeforeUnmount(() => {
 
 onUnmounted(() => {
     setScrollLock(false);
+    stopMemoryDraftProgress();
     // Cleanup UI timers for ALL generating states, not just activeChatChar
     // This prevents leaked intervals and closures referencing unmounted reactive state
     for (const charId of Object.keys(generatingStates)) {
@@ -3083,7 +5198,7 @@ onUnmounted(() => {
                     :regex-revision="regexRevision"
                     :active-search-match-index="searchMatchState.msgIdx === vItem.item.originalIndex ? searchMatchState.occurrenceIdx : -1"
                     :is-selection-mode="isSelectionMode"
-                    :is-selected="selectedMessages.has(vItem.item.data.timestamp)"
+                    :is-selected="selectedMessages.has(vItem.item.data.id)"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"
@@ -3093,7 +5208,8 @@ onUnmounted(() => {
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
-                    @toggle-selection="toggleSelection(vItem.item.data.timestamp)"
+                    @open-memory-coverage="openMessageMemoryCoverage"
+                    @toggle-selection="toggleSelection(vItem.item.data.id)"
                     @toggle-image-hidden="toggleImageHidden(vItem.item.data, vItem.item.originalIndex)"
                     @regenerate-image="(payload) => handleImageRegenerate(vItem.item.originalIndex, payload)"
                 />
@@ -3131,11 +5247,16 @@ onUnmounted(() => {
                 @magic-api="openApiView"
                 @magic-presets="openPresetView"
                 @magic-lorebooks="openLorebookSheet"
+                @magic-memory-books="openMemoryBooksSheet"
                 @magic-regex="openRegexSheet"
                 @magic-image-gen="openImageGenSheet"
                 @magic-glossary="openGlossarySheet"
                 @delete-selected="deleteSelectedMessages"
                 @hide-selected="toggleHideSelectedMessages"
+                @configure-memory-selected="openMemoryGenerationSettings"
+                @generate-memory-draft-selected="generateMemoryDraftFromSelection"
+                @create-memory-selected="createMemoryFromSelection"
+                @remove-memory-selected="removeMemoryFromSelection"
                 @cancel-selection="clearSelection"
             />
             
@@ -3315,6 +5436,10 @@ onUnmounted(() => {
     background: #1ec8ff;
 }
 
+.segment-memory {
+    background: #7ee787;
+}
+
 .segment-authors-note {
     background: #7a6cff;
 }
@@ -3439,6 +5564,39 @@ onUnmounted(() => {
     margin-top: 16px;
 }
 
+.clickable-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-item);
+    border: 1px solid var(--border-color);
+    padding: 0 16px;
+    min-height: 44px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+    margin-top: 4px;
+}
+
+.clickable-selector:active {
+    background: var(--bg-item-active);
+}
+
+.clickable-selector span {
+    min-width: 0;
+    flex: 1;
+}
+
+.clickable-selector svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    fill: var(--text-gray);
+    opacity: 0.5;
+}
+
 .context-sheet-btn {
     flex: 1;
     min-height: 42px;
@@ -3459,6 +5617,171 @@ onUnmounted(() => {
     background: rgba(255, 255, 255, 0.08);
 }
 
+.memory-generation-status-card {
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(30, 200, 255, 0.12);
+    border: 1px solid rgba(30, 200, 255, 0.28);
+}
+
+.memory-generation-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.memory-generation-status-row strong {
+    color: var(--text-black);
+    font-size: 14px;
+}
+
+.memory-generation-status-row span {
+    color: var(--vk-blue);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.memory-session-overview {
+    margin-bottom: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(122, 108, 255, 0.14), rgba(30, 200, 255, 0.08));
+    border: 1px solid rgba(122, 108, 255, 0.22);
+}
+
+.memory-session-overview-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.memory-session-title {
+    color: var(--text-black);
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.memory-session-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.5);
+    color: var(--text-black);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.memory-session-overview-meta {
+    color: var(--text-gray);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.memory-sheet-section {
+    margin-top: 12px;
+}
+
+.memory-sheet-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.memory-sheet-section-head label {
+    color: var(--text-black);
+    font-weight: 800;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.memory-sheet-section-head span {
+    min-width: 28px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-gray);
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.memory-status-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.memory-status-summary-item {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    text-align: center;
+}
+
+.memory-status-summary-item strong {
+    display: block;
+    color: var(--text-black);
+    font-size: 18px;
+    line-height: 1.1;
+}
+
+.memory-status-summary-item span {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-gray);
+    font-size: 12px;
+}
+
+.memory-status-summary-item.warning {
+    background: rgba(255, 184, 77, 0.12);
+    border-color: rgba(255, 184, 77, 0.3);
+}
+
+.memory-status-summary-item.danger {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.3);
+}
+
+.memory-status-summary-item.ok {
+    background: rgba(126, 231, 135, 0.12);
+    border-color: rgba(126, 231, 135, 0.3);
+}
+
+.memory-status-summary-item.draft {
+    background: rgba(122, 108, 255, 0.12);
+    border-color: rgba(122, 108, 255, 0.3);
+}
+
+.memory-entry-card.is-warning {
+    border-color: rgba(255, 184, 77, 0.35);
+    box-shadow: inset 0 0 0 1px rgba(255, 184, 77, 0.14);
+}
+
+.memory-status-badge.ok {
+    background: rgba(126, 231, 135, 0.16);
+    color: #2d8a39;
+}
+
+.memory-status-badge.warning {
+    background: rgba(255, 184, 77, 0.18);
+    color: #a85e00;
+}
+
+.memory-status-badge.draft {
+    background: rgba(122, 108, 255, 0.16);
+    color: #5b4bd0;
+}
+
 @media (max-width: 480px) {
     .context-sheet-summary {
         grid-template-columns: 1fr;
@@ -3466,6 +5789,15 @@ onUnmounted(() => {
 
     .context-sheet-actions {
         flex-direction: column;
+    }
+
+    .memory-status-summary {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .memory-session-overview-head {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
 
@@ -3877,6 +6209,146 @@ onUnmounted(() => {
     background: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent);
     z-index: 900;
     pointer-events: none;
+}
+
+.memory-entry-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.memory-entry-card {
+    padding: 12px;
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+    border-radius: 14px;
+    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.72));
+    backdrop-filter: blur(var(--element-blur, 16px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 16px));
+}
+
+.memory-entry-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.memory-entry-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-black);
+}
+
+.memory-entry-meta {
+    font-size: 12px;
+    color: var(--text-gray);
+    text-transform: uppercase;
+}
+
+.memory-entry-preview {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-dark-gray);
+    white-space: pre-wrap;
+}
+
+.memory-entry-fulltext {
+    padding: 12px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-black);
+    white-space: pre-wrap;
+}
+
+.memory-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.memory-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: #7ee787;
+    background: rgba(126, 231, 135, 0.12);
+    border: 1px solid rgba(126, 231, 135, 0.22);
+}
+
+.memory-entry-delete {
+    border: none;
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: rgba(255, 68, 68, 0.12);
+    color: #ff6b6b;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.memory-status-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.memory-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.memory-status-badge.vector {
+    background: rgba(30, 200, 255, 0.14);
+    color: #1ec8ff;
+}
+
+.memory-status-badge.indexed {
+    background: rgba(126, 231, 135, 0.12);
+    color: #7ee787;
+}
+
+.memory-preview-delete {
+    color: #ff6b6b;
+}
+
+.memory-draft-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.memory-entry-approve {
+    border: none;
+    border-radius: 999px;
+    padding: 6px 10px;
+    background: rgba(30, 200, 255, 0.14);
+    color: #1ec8ff;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.memory-inline-link {
+    margin-top: 8px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--vk-blue);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
 }
 
 

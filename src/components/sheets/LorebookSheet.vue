@@ -7,6 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { lorebookState, initLorebookState, createLorebook, deleteLorebook, deleteLorebookEmbeddings, deleteLorebookEntryEmbedding, importSTLorebook, exportSTLorebook, flushLorebookSave, indexLorebookEntries, indexLorebookEntry, getEmbeddingStatus, getEmbeddingRecord } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { showToast } from '@/core/states/toastState.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -141,6 +142,26 @@ const failedEntryMap = ref(new Map());
 const needsVectorReindex = ref(false);
 const missingVectorCount = ref(0);
 
+async function updateVectorReindexNotice() {
+    if (!activeLorebook.value) {
+        needsVectorReindex.value = false;
+        missingVectorCount.value = 0;
+        return;
+    }
+
+    let missing = 0;
+    for (const entry of activeLorebook.value.entries) {
+        if (!entry?.vectorSearch || !entry?.id) continue;
+        const status = await getEmbeddingStatus(entry.id);
+        if (status !== 'indexed') {
+            missing++;
+        }
+    }
+
+    missingVectorCount.value = missing;
+    needsVectorReindex.value = missing > 0;
+}
+
 const failedEntries = computed(() => {
     if (!activeLorebook.value) return [];
     return activeLorebook.value.entries
@@ -170,6 +191,25 @@ function toggleAllVector() {
     if (!activeLorebook.value) return;
     const enable = !allVectorEnabled.value;
     activeLorebook.value.entries.forEach(e => { e.vectorSearch = enable; });
+}
+
+function resetAllEntriesToGlobal() {
+    if (!activeLorebook.value) return;
+    let changedCount = 0;
+    activeLorebook.value.entries.forEach(entry => {
+        const didChange = entry.caseSensitive !== null
+            || entry.matchWholeWords !== null
+            || entry.useGroupScoring !== null
+            || entry.position !== 'matchGlobal';
+        entry.caseSensitive = null;
+        entry.matchWholeWords = null;
+        entry.useGroupScoring = null;
+        entry.position = 'matchGlobal';
+        if (didChange) changedCount += 1;
+    });
+    showToast(changedCount > 0
+        ? `${changedCount} entries reset to ${t('match_global')}`
+        : 'All entries already match global settings');
 }
 
 const currentContext = ref({ charId: null, chatId: null });
@@ -699,7 +739,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 </div>
                             </div>
                         </div>
-                         <div class="settings-row">
+                        <div class="settings-row">
                             <div class="settings-col">
                                 <label>{{ lorebookState.globalSettings.reserveMode === 'tokens' ? (t('label_budget_cap') || 'Exact tokens') : t('label_lorebook_reserve_percent') }}</label>
                                 <input type="number" v-model="lorebookState.globalSettings.reserveValue" :min="lorebookState.globalSettings.reserveMode === 'tokens' ? 0 : 1" :max="lorebookState.globalSettings.reserveMode === 'tokens' ? undefined : 100">
@@ -707,6 +747,22 @@ defineExpose({ open, openEntry, close, openLorebook });
                              <div class="settings-col">
                                 <label>{{ t('label_min_activations') }}</label>
                                 <input type="number" v-model="lorebookState.globalSettings.minActivations">
+                            </div>
+                        </div>
+                        <div class="settings-item">
+                            <label>{{ t('label_injection_position') }}</label>
+                            <div class="clickable-selector" @click="openOptionSelector({
+                                title: t('label_injection_position'),
+                                options: [
+                                    { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
+                                    { value: 'lorebooksMacro', label: '{{lorebooks}}' }
+                                ],
+                                currentValue: lorebookState.globalSettings.injectionPosition,
+                                onSelect: (v) => lorebookState.globalSettings.injectionPosition = v
+                            })">
+                                <span>{{ lorebookState.globalSettings.injectionPosition === 'worldInfoAfter' ? '@worldInfoAfter' : lorebookState.globalSettings.injectionPosition === 'lorebooksMacro' ? '{' + '{lorebooks}' + '}' : '@worldInfoBefore' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                         </div>
                         <div class="settings-row">
@@ -820,6 +876,10 @@ defineExpose({ open, openEntry, close, openLorebook });
                         <button class="toolbar-btn" @click="toggleAllVector">
                             <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                             <span>{{ allVectorEnabled ? t('btn_disable_vector_all') : t('btn_enable_vector_all') }}</span>
+                        </button>
+                        <button class="toolbar-btn secondary" @click="resetAllEntriesToGlobal">
+                            <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6a6 6 0 0 1-10.24 4.24l-1.42 1.42A8 8 0 1 0 12 5z"/></svg>
+                            <span>{{ t('match_global') }}</span>
                         </button>
                         <button class="toolbar-btn" @click="handleIndexAllEntries" :disabled="indexingEntry">
                             <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
@@ -977,13 +1037,15 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <div class="clickable-selector" @click="openOptionSelector({
                                 title: t('label_injection_position'),
                                 options: [
+                                    { value: 'matchGlobal', label: t('match_global') },
                                     { value: 'worldInfoBefore', label: '@worldInfoBefore (' + t('pos_before_char') + ')' },
-                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' }
+                                    { value: 'worldInfoAfter', label: '@worldInfoAfter (' + t('pos_after_char') + ')' },
+                                    { value: 'lorebooksMacro', label: '{{lorebooks}}' }
                                 ],
                                 currentValue: activeEntry.position,
                                 onSelect: (v) => activeEntry.position = v
                             })">
-                                <span>{{ activeEntry.position === 'worldInfoBefore' ? '@worldInfoBefore' : '@worldInfoAfter' }}</span>
+                                <span>{{ activeEntry.position === 'worldInfoAfter' ? '@worldInfoAfter' : activeEntry.position === 'lorebooksMacro' ? '{' + '{lorebooks}' + '}' : activeEntry.position === 'matchGlobal' ? t('match_global') : '@worldInfoBefore' }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
                             <div class="settings-desc" style="margin-top: 6px;">{{ t('hint_lorebook_macro_override') }}</div>
