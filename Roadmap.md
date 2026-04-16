@@ -609,14 +609,12 @@ Active branch: `fast-fixes`
     - Branch: `feat/fast-fixes-batch3`
 
 10. **Fix: streaming quote formatting breaks mid-quote**
-    - Status: `not done | not tested`
+    - Status: `done | not tested`
     - Complexity: medium
     - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
     - Root cause: `textFormatter.js` regex matches complete quote pairs only
-    - Fix options:
-      - Option A: Stateful quote tracking across delta updates (store open quote state)
-      - Option B: Client-side quote balancer that closes unclosed quotes for display
-      - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
+    - Fix: Added 6 regex patterns after the paired-quote matcher to handle unclosed `"`, `"`, `«` at end of text during streaming
+    - Branch: `feat/fast-fixes-batch3`
 
 11. **Fix: messages stuck in "generating" state**
     - Status: `not done | not tested`
