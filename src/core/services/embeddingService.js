@@ -144,11 +144,16 @@ export async function getEmbeddings(texts) {
 export async function testEmbeddingConnection() {
     const testText = 'Hello, this is a test.';
     const result = await getEmbedding(testText);
+    // result is now [{text, vector}] array
     if (!result || !Array.isArray(result) || result.length === 0) {
-        throw new Error('Embedding returned empty vector');
+        throw new Error('Embedding returned empty result');
+    }
+    const firstChunk = result[0];
+    if (!firstChunk || !firstChunk.vector || !Array.isArray(firstChunk.vector)) {
+        throw new Error('Embedding returned invalid vector');
     }
     return {
-        dimension: result.length,
+        dimension: firstChunk.vector.length,
         success: true
     };
 }

@@ -832,14 +832,38 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
         }
 
         const existing = await db.getEmbedding(entry.id);
-        if (existing && existing.textHash === textHash) {
+        // Skip if already indexed with same text AND already using multi-vector format
+        const isLegacyFormat = existing && existing.vector && !existing.vectors;
+        if (existing && existing.textHash === textHash && !isLegacyFormat) {
+            console.log('[indexLorebookEntries] skipping (already indexed)', {
+                entryId: entry.id,
+                comment: entry.comment?.substring(0, 50),
+                hasVectors: !!existing.vectors,
+                hasVector: !!existing.vector
+            });
             skipped++;
             if (onProgress) onProgress(i + 1, processedEntries.length);
             continue;
         }
+        
+        // Force reindex legacy format entries
+        if (isLegacyFormat) {
+            console.log('[indexLorebookEntries] reindexing legacy entry', {
+                entryId: entry.id,
+                comment: entry.comment?.substring(0, 50)
+            });
+        }
 
         try {
             const vectors = await getEmbeddings([text]);
+            console.log('[indexLorebookEntry] embedding result', {
+                entryId: entry.id,
+                entryName: entry.comment?.substring(0, 50),
+                textLength: text.length,
+                vectorsData: vectors?.[0],
+                hasVectorsData: !!vectors?.[0],
+                firstChunk: vectors?.[0]?.[0]
+            });
             if (vectors && vectors[0]) {
                 await db.saveEmbedding(buildEmbeddingRecord(entry, lorebookId, vectors[0], textHash));
                 indexed++;
