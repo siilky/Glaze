@@ -233,44 +233,6 @@ function scoreDescriptorBoost(entry, queryText) {
     return boost;
 }
 
-function scoreFuzzyKeywordBoost(entry, queryText) {
-    const queryTokens = getHybridTokens(queryText);
-    if (queryTokens.length === 0) return 0;
-
-    const entryTexts = [];
-    if (entry.comment) entryTexts.push(String(entry.comment));
-    if (Array.isArray(entry.keys)) entryTexts.push(...entry.keys.map(v => String(v)));
-    const content = String(entry.content || '');
-    if (content) {
-        const firstLines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(0, 6);
-        entryTexts.push(...firstLines);
-    }
-
-    const entryTokens = entryTexts.flatMap(t => getHybridTokens(t));
-    if (entryTokens.length === 0) return 0;
-
-    let bestMatch = 0;
-    for (const qt of queryTokens) {
-        for (const et of entryTokens) {
-            const commonPrefix = commonPrefixLength(qt, et);
-            if (commonPrefix >= 4) {
-                const ratio = (2 * commonPrefix) / (qt.length + et.length);
-                bestMatch = Math.max(bestMatch, ratio);
-            }
-        }
-    }
-
-    if (bestMatch > 0.4) return Math.min(0.25, bestMatch * 0.3);
-    return 0;
-}
-
-function commonPrefixLength(a, b) {
-    const minLen = Math.min(a.length, b.length);
-    let i = 0;
-    while (i < minLen && a[i] === b[i]) i++;
-    return i;
-}
-
 // --- State Definition ---
 export const lorebookState = reactive({
     lorebooks: [],
@@ -1163,13 +1125,11 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
             return vectorResults.map(result => {
                 const hybridBoost = scoreHybridBoost(result, hybridQueryText);
                 const descriptorBoost = scoreDescriptorBoost(result, hybridQueryText);
-                const fuzzyBoost = scoreFuzzyKeywordBoost(result, hybridQueryText);
                 return {
                     ...result,
-                    score: Math.min(1, result.score + hybridBoost + descriptorBoost + fuzzyBoost),
+                    score: Math.min(1, result.score + hybridBoost + descriptorBoost),
                     hybridBoost,
                     descriptorBoost,
-                    fuzzyBoost,
                     searchLabel: label
                 };
             });
@@ -1204,7 +1164,6 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
                 score: Number(r.score?.toFixed?.(4) || r.score),
                 hybridBoost: Number(r.hybridBoost?.toFixed?.(4) || r.hybridBoost || 0),
                 descriptorBoost: Number(r.descriptorBoost?.toFixed?.(4) || r.descriptorBoost || 0),
-                fuzzyBoost: Number(r.fuzzyBoost?.toFixed?.(4) || r.fuzzyBoost || 0),
                 source: r.searchLabel
             }))
         });
