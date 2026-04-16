@@ -43,9 +43,14 @@ gh pr create --base dev --title "..."
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `dev` (local) | Integration/reference only | No PR |
-| `feat/cloud-sync` | Cloud sync (Phases 1-6) | PR #20 (open) |
-| `feat/vectorization-v2` | Vector/lorebook stabilization | PR #24 (open) |
-| `feat/memorybook` | Memorybook work on top of vectorization | Pending |
+| `fast-fixes` | Mobile testing bug fixes batch | Not yet |
+
+### Historical (merged & deleted)
+- `feat/cloud-sync` → merged via PR #20
+- `feat/vectorization-v2` → merged via PR #24  
+- `feat/memorybook` → merged via PR #27
+- `archive/feat/summary` → deleted
+- `archive/feat/tokenizer` → deleted
 
 ## Before Starting Work
 
@@ -63,3 +68,42 @@ gh pr create --base dev --title "..."
   - testing status: `tested` / `not tested`
 - When work is only partially completed, split the remaining scope into separate follow-up subtasks instead of leaving an ambiguous mixed-status item.
 - Use `Roadmap.md` to explicitly point the user to what still needs manual verification, so pending test coverage is visible in the roadmap itself.
+
+## Conflict Avoidance Strategy (NEW)
+
+### The Problem
+When feature branches accumulate unmerged changes, they diverge and create merge conflicts when upstream accepts other PRs.
+
+### The Solution: Strict Branch Hygiene
+1. **One feature per branch** — Never combine unrelated work in a single branch
+2. **Always branch from `upstream/dev`** (or previous feature if dependent)
+3. **Never branch from local `dev`** that has unmerged feature commits
+4. **Delete merged branches immediately** — both local and remote
+
+### Visual Workflow
+```
+# CORRECT: Isolated feature branches
+upstream/dev ─┬─► feat/fix-ui-crash ─► PR #1 (merged) ─► deleted
+               ├─► feat/add-novelai ─► PR #2 (merged) ─► deleted
+               └─► feat/vector-v3 ──► PR #3 (merged) ─► deleted
+
+# WRONG: Compound branch with multiple features
+upstream/dev ─► dev (local, has feat/A) ─► feat/A+B ─► conflicts!
+```
+
+### Dependency Handling
+If feature B depends on feature A:
+```bash
+# Create branch B from A, not from dev
+git checkout feat/A
+git checkout -b feat/B
+
+# When A merges to upstream/dev, rebase B:
+git checkout feat/B
+git rebase upstream/dev  # Resolve conflicts once
+```
+
+### Cleanup Checklist After Merge
+- [ ] Delete local branch: `git branch -D feat/xxx`
+- [ ] Delete remote branch: `git push origin --delete feat/xxx`
+- [ ] Verify no stale references: `git branch -a`

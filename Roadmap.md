@@ -443,6 +443,8 @@ Expected result:
 
 Upstream принял PR #20 (cloud sync) → после этого PR #24 (vectorization-v2) показал 17 конфликтов. Upstream зарезолвил их сам. Наш PR #27 (memory books + lorebook fixes) тоже был принят.
 
+Current active work branch: `fast-fixes` (branched from `upstream/dev` after audit)
+
 ### Merge topology
 ```
 efbb4e5  ← common ancestor (tokenizer features)
@@ -547,3 +549,94 @@ When returning to this roadmap after unrelated work:
 - memory books should converge vectorization and future cloud-sync-safe data modeling instead of inventing a third storage path;
 - cloud sync implementation lives in `feat/cloud-sync` / PR #20 and already includes encryption, delta sync, queueing, conflict resolution, and `updatedAt` support that memory books must reuse;
 - keep future retrieval work aligned with reusable vector infrastructure, not feature-specific hacks.
+
+## Fast Fixes — Mobile Testing Batch (ORDERED: easy → hard)
+
+Active branch: `fast-fixes`
+
+### ✅ DONE (Batch 1)
+1. **Fix: `memoryDraftTimer` is not defined (CRITICAL CRASH)**
+   - Status: `done | tested (code path)`
+   - Fix: Moved functions from `<script>` to `<script setup>` scope
+   - Testing: Message with `isTyping` should not crash Vue
+
+2. **Fix: vector search toggle should disable keyword search UI**
+   - Status: `done | tested (code path)`
+   - Fix: Hide keys/secondary keys/logic selectors when `vectorSearch=true`
+   - Testing: Enable vector search on entry → UI shows only index button and vector badges
+
+3. **Fix: embedding API key inheritance bug**
+   - Status: `done | tested (code path)`
+   - Fix: Reset `endpoint/key/model` fields when `useSame=true` in `loadEmbeddingSettings()`
+   - Testing: Switch from "Use LLM API" → fields should clear, not show LLM key
+
+4. **Fix: tokenizer doesn't count vector lorebook tokens in breakdown**
+   - Status: `done | tested (code path)`
+   - Fix: Add `vectorLore` to context breakdown, aggregate tokens from `newVectorEntries`
+   - Testing: Generate with vector lorebook entries → breakdown shows purple "Vector Lorebook" segment
+
+5. **Add NovelAI model to Naistera image generation**
+   - Status: `done | tested (code path)`
+   - Fix: Add 'novelai' to `normalizeNaisteraModel()`, UI selector, disable references for it
+   - Testing: Select NovelAI → no reference images sent (per API behavior)
+
+### ⏳ PENDING (ordered by complexity)
+
+6. **Fix: lorebook injections shown for user but not assistant messages**
+   - Status: `not done | not tested`
+   - Complexity: easy
+   - Issue: Injection badges only appear on user messages, missing on assistant replies
+   - Investigation needed: Check `ChatMessage.vue` lorebook display, `loreEntries` storage per message
+   - Fix likely: Remove role-based filter in message rendering
+
+7. **Add i18n keys for new features**
+   - Status: `partially done` (need new keys)
+   - Complexity: easy
+   - Missing: `desc_vector_search_replaces_keys` already added; check remaining gaps
+
+8. **Fix: streaming quote formatting breaks mid-quote**
+   - Status: `not done | not tested`
+   - Complexity: medium
+   - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
+   - Root cause: `textFormatter.js` regex matches complete quote pairs only
+   - Fix options:
+     - Option A: Stateful quote tracking across delta updates (store open quote state)
+     - Option B: Client-side quote balancer that closes unclosed quotes for display
+     - Option C: Move quote coloring to CSS `::before`/`::after` pseudo-elements with dynamic insertion
+
+9. **Fix: messages stuck in "generating" state**
+   - Status: `not done | not tested`
+   - Complexity: medium-hard
+   - Issue: Message stays with typing indicator after generation should complete
+   - Symptoms: timer stops, "generating" label persists, no new text arrives
+   - Investigation areas:
+     - Streaming parser error handling in `generateChatResponse`
+     - `isTyping` flag cleanup on error/cancel
+     - `generatingStates` cleanup on app background/foreground
+     - Web stream reader `finally` blocks
+
+10. **Research: SillyTavern vector search implementation**
+    - Status: `not done`
+    - Complexity: medium (research only)
+    - Goal: Compare ST's approach to ours for potential improvements
+    - Questions:
+      - Do they use chunking or per-entry embeddings?
+      - What similarity metric? (cosine vs dot vs euclidean)
+      - Hybrid search: how do they combine keyword + vector?
+      - Threshold vs top-k selection?
+    - Output: Structured comparison document
+
+11. **Infrastructure: Sync service migration to upstream project**
+    - Status: `not done`
+    - Complexity: hard
+    - Goal: Move cloud sync infrastructure (encryption, delta, queueing) to developer's repo
+    - Deliverables:
+      - Sync endpoint configuration guide (PC/Linux/iOS/Android)
+      - Error 400/402 troubleshooting runbook
+      - OAuth/app token setup instructions per platform
+
+### Branch Strategy (updated)
+- Current: `fast-fixes` from `upstream/dev`
+- Policy: **One feature per branch, always from upstream/dev or previous feature**
+- Never create branches from dev that contain multiple unmerged features
+- If feature B depends on feature A: branch B from A, not from dev
