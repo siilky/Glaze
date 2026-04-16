@@ -960,6 +960,7 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     const embeddingMap = new Map(allEmbeddings.map(e => [e.id, e]));
 
     const candidates = [];
+    const missingEmbeddings = [];
     for (const entry of vectorEntries) {
         const emb = embeddingMap.get(entry.id);
         // NEW: Support both multi-vector (vectors) and legacy (vector)
@@ -971,7 +972,22 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
                 candidate.vector = emb.vector;  // Legacy single vector
             }
             candidates.push(candidate);
+        } else {
+            missingEmbeddings.push({
+                id: entry.id,
+                comment: entry.comment,
+                hasEmb: !!emb,
+                hasVectors: emb?.vectors ? true : false,
+                hasVector: emb?.vector ? true : false
+            });
         }
+    }
+    
+    if (missingEmbeddings.length > 0) {
+        console.warn('[vectorSearchLorebooks] entries missing embeddings', {
+            count: missingEmbeddings.length,
+            entries: missingEmbeddings
+        });
     }
 
     if (candidates.length === 0) {
@@ -1043,6 +1059,20 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
             // Extract the actual vector from the first chunk
             const queryVector = queryVectorsData[0][0].vector;
             const vectorResults = findTopK(queryVector, candidates, candidates.length, 0);
+            
+            console.info('[vectorSearchLorebooks] raw similarity scores', {
+                label,
+                totalResults: vectorResults.length,
+                top15: vectorResults.slice(0, 15).map(r => ({
+                    id: r.id,
+                    comment: r.comment,
+                    rawScore: r.score.toFixed(4),
+                    hasVectors: !!r.vectors,
+                    hasVector: !!r.vector,
+                    chunksCount: r.vectors?.length || 1
+                }))
+            });
+            
             return vectorResults.map(result => {
                 const hybridBoost = scoreHybridBoost(result, hybridQueryText);
                 const descriptorBoost = scoreDescriptorBoost(result, hybridQueryText);
