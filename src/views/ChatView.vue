@@ -446,6 +446,8 @@ import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
+import { incrementMessageCounter, shouldAutoSync, resetMessageCounter } from '@/core/states/syncState.js';
+import { fullSync } from '@/core/services/syncService.js';
 
 async function indexMemoryEntryIfNeeded(entry, charId, sessionId) {
     if (!entry?.vectorSearch) return;
@@ -2264,6 +2266,21 @@ const shouldRecommendHide = computed(() => {
     return historyUsagePercent.value >= threshold;
 });
 
+let autoSyncRunning = false;
+async function triggerAutoSyncCheck() {
+    incrementMessageCounter();
+    if (!shouldAutoSync()) return;
+    if (autoSyncRunning) return;
+    autoSyncRunning = true;
+    resetMessageCounter();
+    try {
+        await fullSync();
+    } catch (e) {
+        console.warn('[ChatView] Auto-sync failed:', e);
+    } finally {
+        autoSyncRunning = false;
+    }
+}
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {
@@ -3737,6 +3754,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     guidanceType: msg.guidanceType
                 };
                 addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
+                triggerAutoSyncCheck();
             } else {
                 msg.swipes[msg.swipeId || 0] = response;
                 if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};
@@ -3810,6 +3828,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                         msg.swipes[0] = response;
                         msg.swipesMeta[0] = { genTime: duration, reasoning: finalReasoning, tokens: msg.tokens };
                         addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
+                        triggerAutoSyncCheck();
                     } else {
                         msg.swipes[msg.swipeId || 0] = response;
                         if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};
