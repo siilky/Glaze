@@ -2,7 +2,7 @@ import { reactive, watch } from 'vue';
 import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
-import { findTopK } from '@/utils/vectorMath.js';
+import { findTopK, findTopKMulti, cosineSimilarity } from '@/utils/vectorMath.js';
 
 function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -1048,7 +1048,8 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
             if (!text || !text.trim()) return [];
             console.info('[vectorSearchLorebooks] embedding query', {
                 label,
-                queryLength: text.length
+                queryLength: text.length,
+                queryPreview: text.substring(0, 200)
             });
             const queryVectorsData = await getEmbeddings([text]);
             if (!queryVectorsData || !queryVectorsData[0] || !queryVectorsData[0][0]?.vector) {
@@ -1056,25 +1057,49 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
                 return [];
             }
 
-            // Extract the actual vector from the first chunk
-            const queryVector = queryVectorsData[0][0].vector;
-            const vectorResults = findTopK(queryVector, candidates, candidates.length, 0);
+            const queryChunks = queryVectorsData[0];
+            console.info('[vectorSearchLorebooks] query chunks', {
+                label,
+                chunksCount: queryChunks.length,
+                chunks: queryChunks.map(c => ({
+                    textPreview: c.text?.substring(0, 80),
+                    vectorLength: c.vector?.length
+                }))
+            });
+
+            // Use all query chunks for MaxSim (query-chunk x candidate-chunk)
+            const vectorResults = findTopKMulti(queryChunks, candidates, candidates.length, 0);
             
             // Debug Asei specifically
             const aseiResult = vectorResults.find(r => r.comment?.includes('Asei'));
             if (aseiResult) {
+                const queryChunksForDebug = queryChunks || [];
                 console.warn('[DEBUG] Asei vector details', {
                     id: aseiResult.id,
                     comment: aseiResult.comment,
                     score: aseiResult.score,
+                    bestQueryChunk: aseiResult._bestQueryChunk,
+                    bestCandidateChunk: aseiResult._bestCandidateChunk,
                     hasVectors: !!aseiResult.vectors,
                     chunksCount: aseiResult.vectors?.length,
-                    chunkTextSamples: aseiResult.vectors?.slice(0, 3).map(c => ({
-                        textPreview: c.text?.substring(0, 100),
-                        vectorLength: c.vector?.length,
-                        hasVector: !!c.vector
-                    })),
-                    vectorsStructure: aseiResult.vectors ? 'array of chunks' : 'missing'
+                    queryChunksCount: queryChunksForDebug.length,
+                    bestQueryText: queryChunksForDebug[aseiResult._bestQueryChunk]?.text?.substring(0, 120),
+                    bestCandidateText: aseiResult.vectors?.[aseiResult._bestCandidateChunk]?.text?.substring(0, 120),
+                    allChunkScores: (() => {
+                        const scores = [];
+                        if (!aseiResult.vectors) return 'no vectors';
+                        for (let qi = 0; qi < queryChunksForDebug.length; qi++) {
+                            const qVec = queryChunksForDebug[qi]?.vector;
+                            if (!qVec) continue;
+                            for (let ci = 0; ci < aseiResult.vectors.length; ci++) {
+                                const cVec = aseiResult.vectors[ci]?.vector;
+                                if (!cVec) continue;
+                                const s = cosineSimilarity(qVec, cVec);
+                                scores.push({ qi, ci, score: s.toFixed(4), queryPreview: queryChunksForDebug[qi]?.text?.substring(0, 50), candidatePreview: aseiResult.vectors[ci]?.text?.substring(0, 50) });
+                            }
+                        }
+                        return scores.sort((a, b) => b.score - a.score);
+                    })()
                 });
             }
             
