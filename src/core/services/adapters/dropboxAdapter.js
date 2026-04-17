@@ -5,13 +5,15 @@ import { db } from '@/utils/db.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const DROPBOX_APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY || '';
-const REDIRECT_URI_NATIVE = 'com.hydall.glaze://oauth/dropbox';
-const REDIRECT_URI_WEB = 'http://localhost:5173/oauth/dropbox/redirect.html';
+const REDIRECT_URI_NATIVE = import.meta.env.VITE_DROPBOX_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/dropbox';
+const REDIRECT_URI_WEB = import.meta.env.VITE_DROPBOX_REDIRECT_WEB || `${window.location.origin}/oauth/dropbox/redirect.html`;
 const API_BASE = 'https://api.dropboxapi.com/2';
 const CONTENT_BASE = 'https://content.dropboxapi.com/2';
 
 function getRedirectUri() {
-    return Capacitor.isNativePlatform() ? REDIRECT_URI_NATIVE : REDIRECT_URI_WEB;
+    if (Capacitor.isNativePlatform()) return REDIRECT_URI_NATIVE;
+    if (isElectron()) return `http://127.0.0.1:${localStorage.getItem('gz_electron_oauth_port') || '0'}/oauth/callback`;
+    return REDIRECT_URI_WEB;
 }
 
 function generateRandomString(length) {
@@ -144,6 +146,13 @@ export async function connect() {
         });
 
         await Browser.open({ url: authUrl.toString() });
+    } else if (isElectron()) {
+        const code = await waitForElectronOAuth(redirectUri, state);
+        if (code) {
+            await exchangeCodeForToken(code, verifier, redirectUri);
+        } else {
+            throw new Error('Authorization cancelled');
+        }
     } else {
         const code = await waitForWebOAuth(authUrl.toString(), state);
         if (code) {
@@ -152,6 +161,68 @@ export async function connect() {
             throw new Error('Authorization cancelled');
         }
     }
+}
+
+function isElectron() {
+    return typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
+}
+
+async function waitForElectronOAuth(redirectUri, expectedState) {
+    const ipcRenderer = window.require('electron').ipcRenderer;
+    const port = await ipcRenderer.invoke('oauth-start-server');
+    redirectUri = `http://127.0.0.1:${port}/oauth/callback`;
+
+    const authUrl = new URL('https://www.dropbox.com/oauth2/authorize');
+    authUrl.searchParams.set('client_id', DROPBOX_APP_KEY);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('code_challenge', localStorage.getItem('gz_dropbox_pkce_verifier'));
+    authUrl.searchParams.set('code_challenge_method', 'plain');
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('token_access_type', 'offline');
+    authUrl.searchParams.set('state', expectedState);
+
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const win = window.open(authUrl.toString(), 'dropbox-auth', `width=${width},height=${height},left=${left},top=${top}`);
+
+    return new Promise((resolve) => {
+        let resolved = false;
+
+        const cleanup = () => clearInterval(interval);
+
+        ipcRenderer.once('oauth-callback', (event, { code, state: returnedState, error }) => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            try { if (win && !win.closed) win.close(); } catch {}
+
+            if (error || !code) { resolve(null); return; }
+            if (returnedState !== expectedState) {
+                console.error('[dropboxAdapter] State mismatch');
+                resolve(null);
+                return;
+            }
+            resolve(code);
+        });
+
+        const interval = setInterval(() => {
+            if (resolved) return;
+            try {
+                if (win && win.closed) {
+                    resolved = true;
+                    cleanup();
+                    ipcRenderer.invoke('oauth-cancel-server');
+                    resolve(null);
+                }
+            } catch {
+                resolved = true;
+                cleanup();
+                resolve(null);
+            }
+        }, 1000);
+    });
 }
 
 function waitForWebOAuth(authUrl, expectedState) {

@@ -590,34 +590,34 @@ Active branch: `fast-fixes`
    - Fix: Wrap Key Match Mode selector in `${!vectorEnabled ? '...' : ''}` in `openMemoryBooksSheet()`
    - Testing: Enable vector search in Memory Books → Key Match Mode should be hidden
 
-### ⏳ PENDING (ordered by complexity)
+### ✅ DONE (Batch 3 — merged into PR #30)
 
 8. **Fix: lorebook injections shown for user but not assistant messages**
-    - Status: `done | not tested`
+    - Status: `done | tested`
     - Complexity: easy
     - Issue: Injection badges only appear on user messages, missing on assistant replies
     - Root cause: `onPromptReady` in `ChatView.vue` redirected `triggeredLorebooks`/`triggeredMemories`/`contextRefs` to `msgIndex - 1` (user message) only
     - Fix: Assign refs to both assistant message at `msgIndex` AND preceding user message at `msgIndex - 1`
-    - Branch: `feat/fast-fixes-batch3`
+    - PR: #30
 
 9. **Add i18n keys for new features**
-    - Status: `done | not tested`
+    - Status: `done | tested`
     - Complexity: easy
     - Added 12 missing keys + 2 asymmetric fixes to both `en/index.json` and `ru/index.json`
     - New keys: `api_create_preset_desc`, `api_presets`, `avatar`, `desc_show_reasoning`, `error_generation`, `imggen_notification_body`, `imggen_notification_title`, `label_custom_model`, `label_model`, `label_show_reasoning`, `no_models_found`, `no_prompt`
     - Symmetry fixes: `top_p` → en, `regex_slash_commands` → ru
-    - Branch: `feat/fast-fixes-batch3`
+    - PR: #30
 
 10. **Fix: streaming quote formatting breaks mid-quote**
-    - Status: `done | not tested`
+    - Status: `done | tested`
     - Complexity: medium
     - Issue: Blue quote styling doesn't apply to streaming text when opening quote arrives without closing quote
     - Root cause: `textFormatter.js` regex matches complete quote pairs only
     - Fix: Added 6 regex patterns after the paired-quote matcher to handle unclosed `"`, `"`, `«` at end of text during streaming
-    - Branch: `feat/fast-fixes-batch3`
+    - PR: #30
 
 11. **Fix: messages stuck in "generating" state**
-    - Status: `done | not tested`
+    - Status: `done | tested`
     - Complexity: medium-hard
     - Issue: Message stays with typing indicator after generation should complete (both streaming and non-streaming)
     - Root causes found:
@@ -633,20 +633,64 @@ Active branch: `fast-fixes`
     - Files modified:
       - `src/core/services/llmApi.js` (defensive checks for invalid API responses)
       - `src/views/ChatView.vue` (robust error handling + unmount cleanup)
-    - Branch: `feat/fast-fixes-batch3`
+    - PR: #30
 
-12. **Research: SillyTavern vector search implementation**
-    - Status: `not done`
-    - Complexity: medium (research only)
-    - Goal: Compare ST's approach to ours for potential improvements
-    - Questions:
-      - Do they use chunking or per-entry embeddings?
-      - What similarity metric? (cosine vs dot vs euclidean)
-      - Hybrid search: how do they combine keyword + vector?
-      - Threshold vs top-k selection?
-    - Output: Structured comparison document
+12. **Multi-vector retrieval with MaxSim and dual-channel lorebook search**
+    - Status: `done | tested`
+    - Complexity: hard
+    - Implementation:
+      - **Multi-vector storage**: Entries chunked (512 tokens default), each chunk embedded separately
+      - **MaxSim algorithm**: Query-chunk × candidate-chunk matrix, take maximum similarity score
+      - **Dual-channel retrieval**: Vector entries now participate in BOTH keyword scan AND vector search
+      - **Keyword priority**: Keyword matches always ranked above vector matches during injection
+      - **OOC stripping**: Strip `[OOC: ...]` from query before embedding
+      - **Force reindex**: Legacy single-vector embeddings auto-detected and reindexed
+      - **DB migration v8**: Convert old `vector` field to new `vectors[]` format
+      - **Debug logging**: Per-chunk similarity breakdown for diagnostics
+    - Architecture:
+      - `vectorMath.js`: `findTopKMulti()` — cross-product MaxSim implementation
+      - `lorebookState.js`: `vectorSearchLorebooks()` — dual-channel merge, keyword priority
+      - `embeddingService.js`: `getEmbeddings()` returns `[[{text, vector}, ...], ...]`
+      - `db.js`: Migration v8, backward-compatible legacy format support
+    - Testing:
+      - Indexed 102 entries (Vareti lorebook) + Project Tokyo lorebooks with bge-m3
+      - Verified keyword matches appear above vector matches
+      - Verified Asei entry retrieved via keyword dual-channel
+      - Verified semantic retrieval for character descriptions
+      - Verified OOC-stripped queries produce cleaner embeddings
+      - Verified force-reindex rebuilds legacy embeddings
+    - PR: #30
+    - Branch: `feat/multi-vector-retrieval` (linear chain from `feat/fast-fixes-batch3`)
 
-13. **Infrastructure: Sync service migration to upstream project**
+### ⏳ PENDING
+
+13. **Sync infrastructure fixes — encryption optional + redirect URI fix**
+    - Status: `done | not tested`
+    - Complexity: medium-hard
+    - Branch: `feat/sync-infrastructure-fixes` (linear chain from `feat/multi-vector-retrieval`)
+    - Changes:
+      - **Encryption is now optional**: Sync works without encryption key. Data stored as plain `.json` instead of `.enc`. If key exists — encrypts as before.
+      - **Redirect URI fix**: Both Dropbox and Google Drive adapters now use configurable redirect URIs via env vars (`VITE_DROPBOX_REDIRECT_NATIVE`, `VITE_DROPBOX_REDIRECT_WEB`, `VITE_GDRIVE_REDIRECT_NATIVE`, `VITE_GDRIVE_REDIRECT_WEB`). Web defaults to `window.location.origin` instead of hardcoded `localhost:5173`.
+      - **Electron OAuth**: Added Electron-specific OAuth flow for Dropbox (loopback server pattern, same as gdrive already had).
+      - **Error 400 root cause**: `redirect_uri` must exactly match what's registered in the OAuth console (Dropbox App Console / Google Cloud Console). Hardcoded `localhost:5173` only works in dev.
+      - **Backward compatibility**: `readCloudEntityByEntry` tries both `.enc` and `.json` extensions. `decryptEntity` auto-detects encrypted vs plain payload.
+      - **SyncSheet UI**: Push/Pull/Auto-sync available without encryption. Encryption shown as optional section. `doWipe` no longer forces new key generation.
+    - Files modified:
+      - `src/core/services/syncEngine.js` — `_encryptionEnabled` state, `ext()`, optional encrypt/decrypt, dual-extension fallback
+      - `src/core/services/syncService.js` — removed mandatory `hasSyncKey` checks, uses `detectEncryptionState()`
+      - `src/core/services/adapters/dropboxAdapter.js` — configurable redirect URIs, Electron OAuth, `isElectron()` helper
+      - `src/core/services/adapters/gdriveAdapter.js` — configurable redirect URIs, `window.location.origin` default
+      - `src/components/sheets/SyncSheet.vue` — encryption optional in UI, new states (`ready`, `has_cloud_data`)
+    - Manual verification needed:
+      - [ ] Verify Dropbox connect/disconnect works on native (Android/iOS) with correct `com.hydall.glaze://oauth/dropbox`
+      - [ ] Verify Google Drive connect/disconnect works on native
+      - [ ] Verify Push/Pull works WITHOUT encryption key (plain JSON)
+      - [ ] Verify Push/Pull works WITH encryption key (encrypted `.enc`)
+      - [ ] Verify fallback: pull from cloud with old `.enc` files when encryption is disabled
+      - [ ] Verify error 400 is fixed after setting correct redirect URI in OAuth console
+      - [ ] Verify Electron OAuth flow works on Windows/Linux desktop builds
+
+14. **Infrastructure: Sync service migration to upstream project**
     - Status: `not done`
     - Complexity: hard
     - Goal: Move cloud sync infrastructure (encryption, delta, queueing) to developer's repo
@@ -656,7 +700,98 @@ Active branch: `fast-fixes`
       - OAuth/app token setup instructions per platform
 
 ### Branch Strategy (updated)
-- Current: `fast-fixes` from `upstream/dev`
-- Policy: **One feature per branch, always from upstream/dev or previous feature**
+- Current: `feat/sync-infrastructure-fixes` (from `feat/multi-vector-retrieval`)
+- Previous: `feat/multi-vector-retrieval` (PR #30, open)
+- Policy: **Linear chain workflow** — each feature branches from previous feature, not from origin/dev
 - Never create branches from dev that contain multiple unmerged features
-- If feature B depends on feature A: branch B from A, not from dev
+- All PRs target `upstream/dev`, never `main`
+
+## Sync Setup Guide — For Developers
+
+### How Cloud Sync Works
+
+Glaze syncs data to cloud storage (Dropbox or Google Drive) using an incremental manifest-based approach:
+1. **Manifest** (`manifest.json`) tracks every entity with `{type, id, path, updatedAt, hash, deleted}`
+2. **Push**: Compare local manifest vs cloud manifest → upload only changed entities
+3. **Pull**: Compare cloud manifest vs local manifest → download only newer entities
+4. **Conflicts**: If local is newer AND cloud is newer → surface conflict for manual resolution
+
+### Platform Setup
+
+#### 1. Dropbox
+
+**Create a Dropbox App:**
+1. Go to https://www.dropbox.com/developers/apps
+2. Click "Create app" → choose "Scoped access" → "Full Dropbox" (or "App folder" if preferred)
+3. Note your **App key**
+
+**Configure OAuth redirect URIs:**
+- In the Dropbox App Console → Settings → OAuth 2 → Redirect URIs
+- Add ALL redirect URIs you will use:
+  - **Native (Android/iOS)**: `com.hydall.glaze://oauth/dropbox`
+  - **Web (production)**: `https://yourdomain.com/oauth/dropbox/redirect.html`
+  - **Web (dev)**: `http://localhost:5173/oauth/dropbox/redirect.html`
+  - **Electron (desktop)**: `http://127.0.0.1:PORT/oauth/callback` (loopback)
+
+**Environment variables (`.env`):**
+```
+VITE_DROPBOX_APP_KEY=your_app_key_here
+# Optional overrides (defaults shown):
+# VITE_DROPBOX_REDIRECT_NATIVE=com.hydall.glaze://oauth/dropbox
+# VITE_DROPBOX_REDIRECT_WEB=https://yourdomain.com/oauth/dropbox/redirect.html
+```
+
+**Android/iOS config:**
+- Ensure `capacitor.config.json` has `"appId": "com.hydall.glaze"` (must match redirect URI scheme)
+- For Android: `android/app/src/main/AndroidManifest.xml` must have intent-filter for `com.hydall.glaze://`
+- For iOS: `ios/App/App/AppDelegate.swift` handles URL scheme via Capacitor
+
+#### 2. Google Drive
+
+**Create a Google Cloud project:**
+1. Go to https://console.cloud.google.com
+2. Create a project → Enable Google Drive API
+3. Go to "Credentials" → "Create OAuth client ID" → "Web application"
+4. Note your **Client ID** (and optionally **Client Secret**)
+
+**Configure redirect URIs:**
+- In Google Cloud Console → Credentials → your OAuth client → "Authorized redirect URIs"
+- Add ALL redirect URIs:
+  - **Native (Android/iOS)**: `com.hydall.glaze://oauth/gdrive`
+  - **Web (production)**: `https://yourdomain.com/oauth/gdrive/redirect.html`
+  - **Web (dev)**: `http://localhost:5173/oauth/gdrive/redirect.html`
+  - **Electron (desktop)**: `http://127.0.0.1:PORT/oauth/callback` (loopback)
+
+**Environment variables (`.env`):**
+```
+VITE_GDRIVE_CLIENT_ID=your_client_id_here
+VITE_GDRIVE_CLIENT_SECRET=your_client_secret_here
+# Optional overrides:
+# VITE_GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive
+# VITE_GDRIVE_REDIRECT_WEB=https://yourdomain.com/oauth/gdrive/redirect.html
+```
+
+### Error 400 Troubleshooting
+
+**Error 400 on OAuth token exchange** = `redirect_uri` mismatch.
+
+The `redirect_uri` sent in the OAuth authorize request must **exactly match** the `redirect_uri` sent in the token exchange request AND must be registered in the provider's OAuth console.
+
+Common causes:
+1. **Hardcoded localhost in production**: Old code used `http://localhost:5173/...` — this only works in dev. Fixed: now uses `window.location.origin` as default.
+2. **Missing redirect URI in OAuth console**: The URI you deploy with must be added to the app's redirect URI list in Dropbox/Google console.
+3. **Platform mismatch**: Native builds use `com.hydall.glaze://...` scheme. Web builds use `https://...`. Each platform needs its own redirect URI registered.
+4. **Port mismatch for Electron**: Electron uses loopback `http://127.0.0.1:PORT/oauth/callback` with a random port. The OAuth provider must allow loopback redirects (Google does by default for "Desktop app" client type; Dropbox requires adding it explicitly).
+
+### Error 401/403 Troubleshooting
+
+- **401**: Access token expired → auto-refresh via `refresh_token`. If refresh also fails → user must reconnect.
+- **403**: App permissions revoked or API quota exceeded. User must reconnect.
+
+### Encryption (Optional)
+
+Encryption uses AES-256-GCM via Web Crypto API, key derived from a 12-word BIP39 mnemonic.
+- **Without encryption**: Data stored as plain JSON in cloud. Simple, portable, debuggable.
+- **With encryption**: Each entity encrypted before upload. Recovery phrase required to decrypt on other devices.
+- **Migration**: If cloud has `.enc` files and encryption is disabled, the system attempts to read both `.enc` and `.json` variants.
+- **Key files**: `src/core/services/crypto/syncCrypto.js` (AES-GCM), `src/core/services/crypto/keyManager.js` (BIP39, storage)

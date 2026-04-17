@@ -1,7 +1,7 @@
 import { syncProvider, syncStatus, SYNC_STATUS, setSyncProgress, clearSyncProgress, setSyncError, updateLastSyncTime, addConflict, clearConflicts, resetMessageCounter, PROVIDERS } from '@/core/states/syncState.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
-import { pushEntities, pullEntities } from '@/core/services/syncEngine.js';
+import { pushEntities, pullEntities, detectEncryptionState, isEncryptionEnabled } from '@/core/services/syncEngine.js';
 import { getSyncKey, hasSyncKey } from '@/core/services/crypto/keyManager.js';
 
 function getAdapter() {
@@ -12,8 +12,6 @@ function getAdapter() {
 
 export async function fullPush() {
     if (syncStatus.value === SYNC_STATUS.SYNCING) return;
-    const keyAvailable = await hasSyncKey();
-    if (!keyAvailable) throw new Error('Encryption key not set up');
 
     syncStatus.value = SYNC_STATUS.SYNCING;
     clearConflicts();
@@ -21,8 +19,9 @@ export async function fullPush() {
 
     try {
         const adapter = getAdapter();
-        const key = await getSyncKey();
-        if (!key) throw new Error('Failed to load sync key');
+        await detectEncryptionState();
+        const key = _encryptionEnabled ? await getSyncKey() : null;
+        if (_encryptionEnabled && !key) throw new Error('Failed to load sync key');
 
         await adapter.ensureFolder('/Glaze');
         await adapter.ensureFolder('/Glaze/characters');
@@ -46,8 +45,6 @@ export async function fullPush() {
 
 export async function fullPull() {
     if (syncStatus.value === SYNC_STATUS.SYNCING) return;
-    const keyAvailable = await hasSyncKey();
-    if (!keyAvailable) throw new Error('Encryption key not set up');
 
     syncStatus.value = SYNC_STATUS.SYNCING;
     clearConflicts();
@@ -55,8 +52,9 @@ export async function fullPull() {
 
     try {
         const adapter = getAdapter();
-        const key = await getSyncKey();
-        if (!key) throw new Error('Failed to load sync key');
+        await detectEncryptionState();
+        const key = isEncryptionEnabled() ? await getSyncKey() : null;
+        if (isEncryptionEnabled() && !key) throw new Error('Failed to load sync key');
 
         const result = await pullEntities(
             adapter,
@@ -92,7 +90,5 @@ export async function fullSync() {
 
 export async function checkSyncReadiness() {
     if (!syncProvider.value) return { ready: false, reason: 'no_provider' };
-    const keyAvailable = await hasSyncKey();
-    if (!keyAvailable) return { ready: false, reason: 'no_key' };
     return { ready: true };
 }

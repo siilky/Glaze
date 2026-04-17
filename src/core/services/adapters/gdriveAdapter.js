@@ -6,8 +6,8 @@ import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const GDRIVE_CLIENT_ID = import.meta.env.VITE_GDRIVE_CLIENT_ID || '';
 const GDRIVE_CLIENT_SECRET = import.meta.env.VITE_GDRIVE_CLIENT_SECRET || '';
-const REDIRECT_URI_NATIVE = 'com.hydall.glaze://oauth/gdrive';
-const REDIRECT_URI_WEB = 'http://localhost:5173/oauth/gdrive/redirect.html';
+const REDIRECT_URI_NATIVE = import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/gdrive';
+const REDIRECT_URI_WEB = import.meta.env.VITE_GDRIVE_REDIRECT_WEB || `${window.location.origin}/oauth/gdrive/redirect.html`;
 const API_BASE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
 const AUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -19,7 +19,9 @@ const FOLDER_NAME = 'Glaze';
 let folderIdCache = null;
 
 function getRedirectUri() {
-    return Capacitor.isNativePlatform() ? REDIRECT_URI_NATIVE : REDIRECT_URI_WEB;
+    if (Capacitor.isNativePlatform()) return REDIRECT_URI_NATIVE;
+    if (isElectron()) return `http://127.0.0.1:${localStorage.getItem('gz_electron_oauth_port') || '0'}/oauth/callback`;
+    return REDIRECT_URI_WEB;
 }
 
 function generateRandomString(length) {
